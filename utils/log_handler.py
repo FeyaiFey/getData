@@ -2,6 +2,7 @@ import logging
 import os
 from datetime import datetime
 from typing import Optional
+import json
 
 class LogHandler:
     """日志处理工具类，用于统一管理日志"""

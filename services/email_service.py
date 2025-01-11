@@ -1,6 +1,6 @@
 import imaplib
 import email
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from models.email_message import EmailMessage
 from utils.email_decoder import EmailDecoder
 from utils.file_handler import FileHandler
@@ -11,6 +11,7 @@ from config import (
     EMAIL_SERVER_PORT, EMAIL_USE_SSL
 )
 import re
+import os
 
 class EmailService:
     def __init__(self):
@@ -21,7 +22,7 @@ class EmailService:
         self.use_ssl = EMAIL_USE_SSL
         self.imap = None
         self.rule_processor = RuleProcessor()
-        self.logger = LogHandler()
+        self.logger = LogHandler().get_logger('EmailService')
 
     def connect(self):
         """连接到邮箱服务器"""
@@ -34,9 +35,9 @@ class EmailService:
             else:
                 self.imap = imaplib.IMAP4(self.server, self.port)
             self.imap.login(self.email, self.password)
-            self.logger.info(f"成功连接到邮箱服务器: {self.server}")
+            self.logger.info("成功连接到邮箱服务器: %s", self.server)
         except Exception as e:
-            self.logger.error(f"连接邮箱服务器失败: {str(e)}")
+            self.logger.error("连接邮箱服务器失败: %s", LogHandler.format_error(e))
             raise
 
     def disconnect(self):
@@ -47,7 +48,7 @@ class EmailService:
                 self.imap.logout()
                 self.logger.info("已断开邮箱服务器连接")
             except Exception as e:
-                self.logger.error(f"断开连接时出错: {str(e)}")
+                self.logger.error("断开连接时出错: %s", LogHandler.format_error(e))
             finally:
                 self.imap = None
 
@@ -64,10 +65,10 @@ class EmailService:
                 if email_msg:
                     email_list.append(email_msg)
             
-            self.logger.info(f"找到 {len(email_list)} 封未读邮件")
+            self.logger.info("找到 %d 封未读邮件", len(email_list))
             return email_list
         except Exception as e:
-            self.logger.error(f"获取未读邮件时出错: {str(e)}")
+            self.logger.error("获取未读邮件时出错: %s", LogHandler.format_error(e))
             return []
 
     def _fetch_email_header(self, uid: bytes) -> Optional[EmailMessage]:
@@ -82,10 +83,10 @@ class EmailService:
                 to=email_header['to'],
                 uid=uid
             )
-            self.logger.debug(f"获取邮件头信息: {email_msg.subject}")
+            self.logger.debug("获取邮件头信息: %s", email_msg.subject)
             return email_msg
         except Exception as e:
-            self.logger.error(f"获取邮件头信息时出错: {str(e)}")
+            self.logger.error("获取邮件头信息时出错: %s", LogHandler.format_error(e))
             return None
 
     def load_full_message(self, email_msg: EmailMessage) -> bool:
@@ -95,120 +96,159 @@ class EmailService:
 
         try:
             # 尝试不同的邮件获取命令
-            try:
-                _, msg_data = self.imap.fetch(email_msg.uid, '(RFC822)')
-            except:
+            msg_data = None
+            fetch_methods = [
+                ('RFC822', '(RFC822)'),
+                ('BODY[]', '(BODY[])'),
+                ('BODY.PEEK[]', '(BODY.PEEK[])')
+            ]
+            
+            for method_name, method_cmd in fetch_methods:
                 try:
-                    _, msg_data = self.imap.fetch(email_msg.uid, '(BODY[])')
-                except:
-                    _, msg_data = self.imap.fetch(email_msg.uid, '(BODY.PEEK[])')
+                    self.logger.debug("尝试使用 %s 获取邮件", method_name)
+                    _, msg_data = self.imap.fetch(email_msg.uid, method_cmd)
+                    if msg_data and msg_data[0]:
+                        break
+                except Exception as e:
+                    self.logger.debug("%s 获取失败: %s", method_name, LogHandler.format_error(e))
+                    continue
 
-            # 检查返回的数据
             if not msg_data or not msg_data[0]:
-                self.logger.error(f"获取邮件数据为空: {email_msg.subject}")
+                self.logger.error("获取邮件数据为空: %s", email_msg.subject)
                 return False
 
-            # 获取原始邮件数据
             raw_email = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
             
-            # 如果是整数，转换为字节串
+            # 处理数据类型
             if isinstance(raw_email, int):
                 raw_email = str(raw_email).encode('utf-8')
-            
-            # 确保数据是字节类型
-            if not isinstance(raw_email, bytes):
+            elif not isinstance(raw_email, bytes):
                 raw_email = str(raw_email).encode('utf-8')
 
-            email_msg._full_message = email.message_from_bytes(raw_email)
-            self.logger.debug(f"已加载完整邮件内容: {email_msg.subject}")
+            full_message = email.message_from_bytes(raw_email)
+            email_msg.set_full_message(full_message)
+            self.logger.debug("已加载完整邮件内容: %s", email_msg.subject)
             return True
         except Exception as e:
-            self.logger.error(f"加载邮件内容时出错: {str(e)}")
+            self.logger.error("加载邮件内容时出错: %s", LogHandler.format_error(e))
             return False
 
     def mark_as_read(self, email_msg: EmailMessage):
         """将邮件标记为已读"""
         try:
             self.imap.store(email_msg.uid, '+FLAGS', '\\Seen')
-            self.logger.info(f"邮件已标记为已读: {email_msg.subject}")
+            self.logger.info("邮件已标记为已读: %s", email_msg.subject)
         except Exception as e:
-            self.logger.error(f"标记邮件为已读时出错: {str(e)}")
+            self.logger.error("标记邮件为已读时出错: %s", LogHandler.format_error(e))
 
-    def get_attachments(self, email_msg: EmailMessage, rule: dict) -> List[str]:
-        """获取邮件附件"""
-        if not self.load_full_message(email_msg):
-            self.logger.error(f"无法加载邮件完整内容: {email_msg.subject}")
-            return []
-
-        downloaded_files = []
-        has_matching_attachment = False
-        self.logger.info(f"开始处理邮件附件 - 主题: {email_msg.subject}")
-
-        try:
-            for part in email_msg._full_message.walk():
-                if part.get_content_maintype() == 'multipart':
-                    continue
-                
-                content_disp = part.get('Content-Disposition')
-                if content_disp is None:
-                    continue
-
-                filename = EmailDecoder.decode_filename(part.get_filename())
-                if not filename:
-                    continue
-
-                self.logger.debug(f"发现附件: {filename}")
-
-                if filename.lower().endswith(('.xlsx', '.xls')):
-                    self.logger.debug(f"Excel附件: {filename}")
-                    # 检查文件名是否匹配当前规则的模式
-                    filename_matched = False
-                    for pattern in rule['attachment_name_pattern']:
-                        try:
-                            self.logger.debug(f"尝试匹配模式: {pattern}")
-                            self.logger.debug(f"当前文件名: {filename}")
-                            match_result = re.match(pattern, filename, re.IGNORECASE)
-                            if match_result:
-                                filename_matched = True
-                                self.logger.debug(f"匹配成功: {pattern}")
-                                self.logger.debug(f"匹配结果: {match_result.group()}")
-                                break
-                            else:
-                                self.logger.debug(f"匹配失败: {pattern}")
-                        except re.error as e:
-                            self.logger.warning(f"无效的附件名正则表达式: {pattern}, 错误: {str(e)}")
-                            continue
-                    
-                    if not filename_matched:
-                        self.logger.debug(f"附件名称不匹配任何模式: {filename}")
-                        continue
-
-                    has_matching_attachment = True
-                    download_path = rule.get('download_path', 'downloads')
-                    self.logger.debug(f"下载路径: {download_path}")
-                    FileHandler.ensure_dir(download_path)
-
-                    save_filename = FileHandler.generate_unique_filename(filename)
-                    file_path = FileHandler.join_paths(download_path, save_filename)
-                    self.logger.debug(f"保存路径: {file_path}")
-
-                    try:
-                        content = part.get_payload(decode=True)
-                        if content:
-                            FileHandler.save_file(content, file_path)
-                            downloaded_files.append(file_path)
-                            self.logger.info(f"成功下载附件: {save_filename} (规则: {rule['name']})")
-                        else:
-                            self.logger.warning(f"警告: 附件内容为空: {filename}")
-                    except Exception as e:
-                        self.logger.error(f"下载附件时出错: {filename}, 错误: {str(e)}")
-
-        except Exception as e:
-            self.logger.error(f"处理邮件附件时出错: {str(e)}")
-
-        if has_matching_attachment:
-            self.mark_as_read(email_msg)
+    def _debug_print_message_structure(self, message, level=0):
+        """打印邮件结构的辅助方法"""
+        prefix = "  " * level
+        self.logger.debug("{}Type: {}", prefix, message.get_content_type())
+        self.logger.debug("{}Disposition: {}", prefix, message.get('Content-Disposition'))
+        
+        filename = message.get_filename()
+        if filename:
+            decoded_filename = EmailDecoder.decode_filename(filename)
+            self.logger.debug("{}Filename: {}", prefix, filename)
+            self.logger.debug("{}Decoded filename: {}", prefix, decoded_filename)
+        
+        if message.is_multipart():
+            for part in message.get_payload():
+                self._debug_print_message_structure(part, level + 1)
         else:
-            self.logger.info(f"未找到匹配的附件: {email_msg.subject}")
+            content_type = message.get_content_type()
+            self.logger.debug("{}Content-Type: {}", prefix, content_type)
+            if content_type == 'text/plain':
+                try:
+                    self.logger.debug("{}Text content length: {}", prefix, len(message.get_payload()))
+                except:
+                    self.logger.debug("{}Could not get text content length", prefix)
 
-        return downloaded_files 
+    def get_attachments(self, email_msg: EmailMessage, rule: Dict[str, Any]) -> List[str]:
+        """获取邮件的附件
+        
+        Args:
+            email_msg: 邮件对象
+            rule: 匹配规则
+            
+        Returns:
+            List[str]: 下载的附件文件路径列表
+        """
+        try:
+            self.logger.info("\n=== 邮件结构 (%s) ===", email_msg.subject)
+            self.logger.info("开始处理邮件附件 - 主题: %s", email_msg.subject)
+            self.logger.info("开始遍历邮件结构")
+            
+            downloaded_files = []
+            all_attachments = []
+            
+            # 遍历邮件结构
+            for part in email_msg.message.walk():
+                self.logger.info("Content-Type: %s", part.get_content_type())
+                self.logger.info("Content-Disposition: %s", part.get('Content-Disposition'))
+                
+                # 跳过非附件部分
+                if not part.get('Content-Disposition'):
+                    self.logger.info("跳过没有 Content-Disposition 的部分")
+                    continue
+                    
+                filename = part.get_filename()
+                if not filename:
+                    self.logger.info("跳过没有文件名的部分")
+                    continue
+                    
+                # 解码文件名
+                filename = EmailDecoder.decode_filename(filename)
+                all_attachments.append(filename)
+                
+                # 检查是否为Excel文件
+                if not filename.lower().endswith(('.xls', '.xlsx')):
+                    self.logger.info("跳过非Excel文件: %s", filename)
+                    continue
+                    
+                # 检查文件名是否匹配规则
+                if not self.rule_processor.match_attachment_name(rule, filename):
+                    self.logger.info("附件名称不匹配规则: %s", filename)
+                    continue
+                    
+                # 获取保存路径
+                save_dir = rule['download_path']
+                save_path = os.path.join(save_dir, filename)
+                
+                # 确保目录存在
+                FileHandler.ensure_dir(save_dir)
+                
+                # 保存附件
+                try:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        FileHandler.save_file(payload, save_path)
+                        downloaded_files.append(save_path)
+                        self.logger.info("成功保存附件: %s", save_path)
+                    else:
+                        self.logger.warning("附件内容为空: %s", filename)
+                except Exception as e:
+                    self.logger.error("保存附件失败: %s, 错误: %s", 
+                                    filename, LogHandler.format_error(e))
+            
+            if not downloaded_files:
+                if all_attachments:
+                    self.logger.info("未找到匹配的附件: %s", email_msg.subject)
+                    self.logger.info("所有附件: %s", ", ".join(all_attachments))
+                else:
+                    self.logger.info("邮件中没有任何附件")
+                    
+                self.logger.info("邮件结构信息:")
+                for part in email_msg.message.walk():
+                    self.logger.info("Content-Type: %s", part.get_content_type())
+                    self.logger.info("Content-Disposition: %s", part.get('Content-Disposition'))
+                    self.logger.info("Filename: %s", part.get_filename())
+                    self.logger.info("---")
+                    
+            return downloaded_files
+            
+        except Exception as e:
+            self.logger.error("处理附件时出错: %s, 错误: %s", 
+                            email_msg.subject, LogHandler.format_error(e))
+            return [] 

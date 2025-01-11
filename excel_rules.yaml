@@ -13,7 +13,7 @@ rules:
       value: "物流公司"  # 表尾标记值
     date_cell:       # 日期单元格位置
       row: 3         # 日期所在行（0-based）
-      column: "K"    # 日期所在列
+      column: "P"    # 日期所在列
     skip_empty: true # 跳过空行
     fields:
       - name: "送货日期"  # 从date_cell提取

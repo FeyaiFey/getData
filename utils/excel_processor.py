@@ -11,7 +11,8 @@ class ExcelProcessor:
     def __init__(self, rules_file: str = 'excel_rules.yaml', log_file: str = 'process_dates.json'):
         """初始化Excel处理器"""
         self.rules = self._load_rules(rules_file)
-        self.log_handler = LogHandler(log_file)
+        self.log_handler = LogHandler()
+        self.process_dates_file = log_file
 
     def _load_rules(self, rules_file: str) -> Dict[str, Any]:
         """加载Excel处理规则"""
@@ -257,9 +258,17 @@ class ExcelProcessor:
                     row = df.iloc[idx]
                     # 检查是否是有效的数据行
                     if rule.get('skip_empty', True):
-                        first_col = ord(rule['fields'][0]['column'].upper()) - ord('A')
-                        if pd.isna(row[first_col]) or str(row[first_col]).strip() == '':
-                            continue
+                        # 找到第一个有效的列名（非空且不是固定值的字段）
+                        valid_field = None
+                        for field in rule['fields']:
+                            if field.get('column') and not field.get('value'):
+                                valid_field = field
+                                break
+                        
+                        if valid_field:
+                            first_col = ord(valid_field['column'].upper()) - ord('A')
+                            if pd.isna(row[first_col]) or str(row[first_col]).strip() == '':
+                                continue
                     
                     item = self._extract_row_data(row, rule['fields'])
                     if date:

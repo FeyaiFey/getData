@@ -13,7 +13,7 @@ rules:
     subject_contains: ["^苏州华芯封装产品送货单\\d+\\.\\d+$"]
     sender_contains: ["czmk4@hisemi.com.cn"]
     receiver_contains: ["wanghq@h-sun.com"]
-    attachment_name_pattern: ["^\\d{2}-\\d{2}\\s+008\\s+\\d{2}\\.xlsx$"]
+    attachment_name_pattern: ["^\\d{2}-\\d{2}\\s+008\\s+\\d{2}\\.xlsx?$"]
     download_path: "D:/PythonProject/getData/downloads/shipping/华宇送货单"
 
   - name: "汉旗进度表"
@@ -31,10 +31,10 @@ rules:
     download_path: "D:/PythonProject/getData/downloads/shipping/汉旗送货单"
 
   - name: "芯丰送货单"
-    subject_contains: ["^314 成品出货通知 \\d{2}/\\d{2}$"]
+    subject_contains: ["^314 成品出货通知 \\d{1,2}/\\d{1,2}$"]
     sender_contains: ["cs01@icpkg.com"]
     receiver_contains: ["fanlm@h-sun.com", "wanghq@h-sun.com", "wxb1@h-sun.com", "cangk2@h-sun.com"]
-    attachment_name_pattern: ["^销售出库单-XSCKD\\d{10}-314\\.xlsx?$"]
+    attachment_name_pattern: ["^销售出库单-XSCKD\\d{10}-314\\.xlsx$"]
     download_path: "D:/PythonProject/getData/downloads/shipping/芯丰送货单"
 
   - name: "PSMC进度表"

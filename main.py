@@ -17,16 +17,16 @@ def main():
     print("邮件自动下载程序已启动...")
     print("正在监控未读邮件...")
     
-    # 设置定时任务，每分钟执行一次
-    schedule.every(1).minutes.do(job)
-    
+    # 设置定时任务，每10分钟执行一次
+    schedule.every(10).minutes.do(job)
+
     # 首次运行
     job()
     
     # 持续运行定时任务
     while True:
         schedule.run_pending()
-        time.sleep(10)  # 每10秒检查一次是否需要执行任务
+        time.sleep(60)  # 每10秒检查一次是否需要执行任务
 
 if __name__ == "__main__":
     main() 

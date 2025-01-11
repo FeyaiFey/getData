@@ -26,7 +26,7 @@ def main():
     # 持续运行定时任务
     while True:
         schedule.run_pending()
-        time.sleep(60)  # 每10秒检查一次是否需要执行任务
+        time.sleep(60)  # 每600秒检查一次是否需要执行任务
 
 if __name__ == "__main__":
     main() 

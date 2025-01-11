@@ -3,6 +3,7 @@ from services.email_service import EmailService
 from services.rule_processor import RuleProcessor
 from utils.log_handler import LogHandler
 from models.email_message import EmailMessage
+from utils.excel_processor import ExcelProcessor
 
 class EmailProcessor:
     """邮件处理器，负责处理未读邮件和下载附件"""
@@ -75,23 +76,40 @@ class EmailProcessor:
         """处理所有未读邮件"""
         try:
             # 获取未读邮件
-            unread_emails = self.email_service.get_unread_emails()
-            if not unread_emails:
-                self.logger.info("没有未读邮件")
+            email_list = self.email_service.get_unread_emails()
+            if not email_list:
+                self.logger.info("没有找到未读邮件")
                 return
-                
-            # 处理每封邮件
-            total_files = []
-            for email_msg in unread_emails:
-                files = self._process_single_email(email_msg)
-                total_files.extend(files)
-                
-            if not total_files:
-                self.logger.info("没有下载任何附件")
-            else:
-                self.logger.info("成功下载 %d 个附件", len(total_files))
-                
+
+            for email_msg in email_list:
+                try:
+                    # 获取匹配的规则
+                    rule = self.rule_processor.get_matching_rule(email_msg)
+                    if not rule:
+                        continue
+
+                    # 下载附件
+                    attachments = self._process_single_email(email_msg)
+                    if not attachments:
+                        continue
+
+                    # 如果是送货单规则，处理Excel文件
+                    if "送货单" in rule["name"]:
+                        excel_processor = ExcelProcessor()
+                        for attachment_path in attachments:
+                            try:
+                                # 处理Excel文件并生成JSON
+                                excel_processor.process_excel(attachment_path, rule["name"])
+                            except Exception as e:
+                                self.logger.error(f"处理Excel文件失败: {str(e)}")
+                                continue
+
+                except Exception as e:
+                    self.logger.error(f"处理邮件时出错: {str(e)}")
+                    continue
+
         except Exception as e:
-            self.logger.error("处理未读邮件时出错: %s", LogHandler.format_error(e))
+            self.logger.error(f"处理未读邮件时出错: {str(e)}")
+            raise
         finally:
             self.email_service.disconnect() 

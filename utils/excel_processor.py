@@ -6,13 +6,37 @@ import os
 from datetime import datetime
 import re
 from .log_handler import LogHandler
+import json
 
 class ExcelProcessor:
     def __init__(self, rules_file: str = 'excel_rules.yaml', log_file: str = 'process_dates.json'):
         """初始化Excel处理器"""
-        self.rules = self._load_rules(rules_file)
-        self.log_handler = LogHandler()
-        self.process_dates_file = log_file
+        try:
+            # 尝试多个可能的路径
+            possible_paths = [
+                rules_file,  # 当前目录
+                os.path.join('config', rules_file),  # config目录
+                os.path.join(os.path.dirname(__file__), '..', rules_file),  # 项目根目录
+                os.path.join(os.path.dirname(__file__), '..', 'config', rules_file)  # config目录（相对于utils）
+            ]
+            
+            rules_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    rules_path = path
+                    break
+                    
+            if not rules_path:
+                raise FileNotFoundError(f"找不到规则文件，尝试过的路径: {possible_paths}")
+                
+            self.rules = self._load_rules(rules_path)
+            self.log_handler = LogHandler()
+            self.process_dates_file = log_file
+            print(f"成功加载规则文件: {rules_path}")
+            
+        except Exception as e:
+            print(f"初始化Excel处理器失败: {str(e)}")
+            raise
 
     def _load_rules(self, rules_file: str) -> Dict[str, Any]:
         """加载Excel处理规则"""
@@ -217,7 +241,7 @@ class ExcelProcessor:
         """处理Excel文件，提取指定字段"""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
-
+            
         if rule_name not in self.rules:
             raise ValueError(f"未找到规则: {rule_name}")
 
@@ -284,8 +308,18 @@ class ExcelProcessor:
                 else:
                     print("未提取到数据")
 
-            return all_results
+            # 生成JSON文件
+            if all_results:
+                json_dir = os.path.join("downloads", "shipping", rule_name)
+                os.makedirs(json_dir, exist_ok=True)
+                
+                json_path = os.path.join(json_dir, "处理结果.json")
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(all_results, f, ensure_ascii=False, indent=2)
+                print(f"成功生成JSON文件: {json_path}")
 
+            return all_results
+            
         except Exception as e:
             print(f"处理Excel文件时出错: {str(e)}")
             import traceback

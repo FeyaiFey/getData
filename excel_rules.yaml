@@ -1,8 +1,9 @@
 # Excel字段提取规则配置文件
 # 可以配置多组规则，每组规则定义不同送货单的字段提取方式
+# 送货单的name为excel_rules.yaml中的name(否则无法匹配excel_rules.yaml中的规则)
 
 rules:
-  华宇送货单:
+  池州华宇送货单:
     sheet_name: "Page 1"  # 固定的sheet名称
     sheet_format: "fixed"  # 固定的sheet名称
     header_marker:

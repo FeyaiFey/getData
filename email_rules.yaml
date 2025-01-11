@@ -1,5 +1,6 @@
 # 邮件规则配置文件
 # 可以配置多组规则，每组规则都会被单独处理
+# 送货单的name为excel_rules.yaml中的name(否则无法匹配excel_rules.yaml中的规则)
 
 rules:
   - name: "池州华宇进度表"
@@ -7,62 +8,62 @@ rules:
     sender_contains: ["hisemi-mes@hisemi.com.cn"]
     receiver_contains: ["fanlm@h-sun.com"]
     attachment_name_pattern: ["^苏州华芯微电子股份有限公司的封装产品进展表.*\\.xlsx?$"]
-    download_path: "D:/PythonProject/getData/downloads/wip/华宇进度表"
+    download_path: "downloads/wip/池州华宇进度表"
 
   - name: "池州华宇送货单"
     subject_contains: ["^苏州华芯封装产品送货单\\d+\\.\\d+$"]
     sender_contains: ["czmk4@hisemi.com.cn"]
     receiver_contains: ["wanghq@h-sun.com"]
     attachment_name_pattern: ["^\\d{2}-\\d{2}\\s+008\\s+\\d{2}\\.xlsx?$"]
-    download_path: "D:/PythonProject/getData/downloads/shipping/华宇送货单"
+    download_path: "downloads/shipping/池州华宇送货单"
 
   - name: "汉旗进度表"
     subject_contains: ["^华芯微WIP$"]
     sender_contains: ["a13589601455@163.com"]
     receiver_contains: ["fanlm@h-sun.com", "wanghq@h-sun.com", "wxb1@h-sun.com", "test2@h-sun.com", "cangk2@h-sun.com", "fuyanju_2020@163.com"]
     attachment_name_pattern: ["^华芯微WIP\\.xlsx?$"]
-    download_path: "D:/PythonProject/getData/downloads/wip/汉旗进度表"
+    download_path: "downloads/wip/汉旗进度表"
 
   - name: "汉旗送货单"
     subject_contains: ["^华芯微\\d+月份出货单\\(\\d+\\)$"]
     sender_contains: ["a13589601455@163.com"]
     receiver_contains: ["fuyanju_2020@163.com"]
     attachment_name_pattern: ["^华芯微\\d+月份出货单\\(\\d+\\)\\.xls$"]
-    download_path: "D:/PythonProject/getData/downloads/shipping/汉旗送货单"
+    download_path: "downloads/shipping/汉旗送货单"
 
   - name: "芯丰送货单"
     subject_contains: ["^314 成品出货通知 \\d{1,2}/\\d{1,2}$"]
     sender_contains: ["cs01@icpkg.com"]
     receiver_contains: ["fanlm@h-sun.com", "wanghq@h-sun.com", "wxb1@h-sun.com", "cangk2@h-sun.com"]
     attachment_name_pattern: ["^销售出库单-XSCKD\\d{10}-314\\.xlsx$"]
-    download_path: "D:/PythonProject/getData/downloads/shipping/芯丰送货单"
+    download_path: "downloads/shipping/芯丰送货单"
 
   - name: "PSMC进度表"
     subject_contains: ["^\\[PSMC Lot Status - 8\"\\] HUAXIN$"]
     sender_contains: ["epsmc@powerchip.com"]
     receiver_contains: ["fanlm@h-sun.com"]
     attachment_name_pattern: ["^HUAXIN_8_\\d+\\.xlsx$"]
-    download_path: "D:/PythonProject/getData/downloads/wip/PSMC进度表"
+    download_path: "downloads/wip/PSMC进度表"
 
   - name: "CSMC进度表1"
     subject_contains: ["^Your wafer report FAB1$"]
     sender_contains: ["crm_wip_zy@csmc.crmicro.com"]
     receiver_contains: ["mahongmei0383@csmc.crmicro.com", "wxb1@h-sun.com", "fanlm@h-sun.com"]
     attachment_name_pattern: ["^HS-SZ_FAB1\\(\\d{4}-\\d{2}-\\d{2}\\)\\.xls$"]
-    download_path: "D:/PythonProject/getData/downloads/wip/CSMC_FAB1进度表"
+    download_path: "downloads/wip/CSMC_FAB1进度表"
 
   - name: "CSMC进度表2"
     subject_contains: ["^Your wafer report FAB2$"]
     sender_contains: ["crm_wip_zy@csmc.crmicro.com"]
     receiver_contains: ["mahongmei0383@csmc.crmicro.com", "wxb1@h-sun.com", "fanlm@h-sun.com"]
     attachment_name_pattern: ["^HS-SZ_FAB2\\(\\d{4}-\\d{2}-\\d{2}\\)\\.xls$"]
-    download_path: "D:/PythonProject/getData/downloads/wip/CSMC_FAB2进度表"
+    download_path: "downloads/wip/CSMC_FAB2进度表"
 
   - name: "荣芯进度表"
     subject_contains: ["^Rongsemi WIP&Stock$"]
     sender_contains: ["wip_report@rongsemi.com"]
     receiver_contains: ["fanlm@h-sun.com", "wanghq@h-sun.com", "jiangm@h-sun.com", "hanhj@h-sun.com", "leihj@h-sun.com"]
     attachment_name_pattern: ["^HuaXin WIP&Stock Report_\\d+\\.xls$"]
-    download_path: "D:/PythonProject/getData/downloads/wip/荣芯进度表"
+    download_path: "downloads/wip/荣芯进度表"
 
 # 可以继续添加更多规则... 

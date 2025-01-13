@@ -7,6 +7,7 @@ from datetime import datetime
 import re
 from .log_handler import LogHandler
 import json
+import shutil
 
 class ExcelProcessor:
     def __init__(self, rules_file: str = 'excel_rules.yaml', log_file: str = 'process_dates.json'):
@@ -240,83 +241,182 @@ class ExcelProcessor:
     def process_excel(self, file_path: str, rule_name: str) -> List[Dict[str, Any]]:
         """处理Excel文件，提取指定字段"""
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"文件不存在: {file_path}")
+            print(f"文件或目录已被处理，跳过: {file_path}")
+            return []
             
         if rule_name not in self.rules:
             raise ValueError(f"未找到规则: {rule_name}")
 
         rule = self.rules[rule_name]
         all_results = []
+        excel_files_info = []  # 记录Excel文件信息
         
         try:
-            # 获取所有sheet
-            xl = pd.ExcelFile(file_path)
-            sheet_names = xl.sheet_names
-            print(f"找到的sheet: {sheet_names}")
+            # 获取目录下所有的Excel文件
+            excel_dir = os.path.dirname(file_path)
+            if not os.path.exists(excel_dir):
+                print(f"目录已被处理，跳过: {excel_dir}")
+                return []
+                
+            excel_files = [f for f in os.listdir(excel_dir) 
+                         if f.lower().endswith(('.xlsx', '.xls'))]
+            print(f"找到 {len(excel_files)} 个Excel文件")
 
-            # 处理每个sheet
-            for sheet_name in sheet_names:
-                print(f"\n处理sheet: {sheet_name}")
-                # 检查是否应该处理该sheet
-                if not self._should_process_sheet(sheet_name, rule, rule_name):
-                    print(f"跳过sheet: {sheet_name}")
+            # 如果没有找到Excel文件，直接返回
+            if not excel_files:
+                print("没有找到Excel文件，跳过处理")
+                return []
+
+            # 处理每个Excel文件
+            for excel_file in excel_files:
+                excel_path = os.path.join(excel_dir, excel_file)
+                if not os.path.exists(excel_path):
+                    print(f"文件已被处理，跳过: {excel_path}")
                     continue
-
-                # 读取sheet
-                df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
-                
-                # 提取日期
-                date = self._extract_date_from_cell(df, rule) or self._extract_date_from_sheet(sheet_name, rule)
-                if date:
-                    print(f"提取到日期: {date.strftime('%Y-%m-%d')}")
-                else:
-                    print("未找到日期")
-                
-                # 查找数据范围
-                start_row, end_row = self._find_data_range(df, rule)
-                print(f"数据范围: {start_row} - {end_row}")
-                
-                # 提取数据
-                sheet_results = []
-                for idx in range(start_row, end_row):
-                    row = df.iloc[idx]
-                    # 检查是否是有效的数据行
-                    if rule.get('skip_empty', True):
-                        # 找到第一个有效的列名（非空且不是固定值的字段）
-                        valid_field = None
-                        for field in rule['fields']:
-                            if field.get('column') and not field.get('value'):
-                                valid_field = field
-                                break
-                        
-                        if valid_field:
-                            first_col = ord(valid_field['column'].upper()) - ord('A')
-                            if pd.isna(row[first_col]) or str(row[first_col]).strip() == '':
-                                continue
                     
-                    item = self._extract_row_data(row, rule['fields'])
-                    if date:
-                        item['送货日期'] = date.strftime('%Y-%m-%d')
-                    sheet_results.append(item)
+                print(f"\n处理文件: {excel_file}")
+                excel_files_info.append({'path': excel_path, 'xl': None})
+                
+                try:
+                    # 获取所有sheet
+                    xl = pd.ExcelFile(excel_path)
+                    excel_files_info[-1]['xl'] = xl  # 保存ExcelFile对象以便后续关闭
+                    sheet_names = xl.sheet_names
+                    print(f"找到的sheet: {sheet_names}")
 
-                if sheet_results:
-                    print(f"提取到 {len(sheet_results)} 条记录")
-                    all_results.extend(sheet_results)
-                    # 更新处理日期
-                    if date and rule.get('check_date', False):
-                        self.log_handler.update_process_date(rule_name, date)
-                else:
-                    print("未提取到数据")
+                    # 处理每个sheet
+                    for sheet_name in sheet_names:
+                        print(f"\n处理sheet: {sheet_name}")
+                        # 检查是否应该处理该sheet
+                        if not self._should_process_sheet(sheet_name, rule, rule_name):
+                            print(f"跳过sheet: {sheet_name}")
+                            continue
 
-            # 生成JSON文件
+                        # 读取sheet
+                        df = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
+                        
+                        # 提取日期
+                        date = self._extract_date_from_cell(df, rule) or self._extract_date_from_sheet(sheet_name, rule)
+                        if date:
+                            print(f"提取到日期: {date.strftime('%Y-%m-%d')}")
+                        else:
+                            print("未找到日期")
+                        
+                        # 查找数据范围
+                        start_row, end_row = self._find_data_range(df, rule)
+                        print(f"数据范围: {start_row} - {end_row}")
+                        
+                        # 提取数据
+                        sheet_results = []
+                        for idx in range(start_row, end_row):
+                            row = df.iloc[idx]
+                            # 检查是否是有效的数据行
+                            if rule.get('skip_empty', True):
+                                # 找到第一个有效的列名（非空且不是固定值的字段）
+                                valid_field = None
+                                for field in rule['fields']:
+                                    if field.get('column') and not field.get('value'):
+                                        valid_field = field
+                                        break
+                                
+                                if valid_field:
+                                    first_col = ord(valid_field['column'].upper()) - ord('A')
+                                    if pd.isna(row[first_col]) or str(row[first_col]).strip() == '':
+                                        continue
+                            
+                            item = self._extract_row_data(row, rule['fields'])
+                            if date:
+                                item['送货日期'] = date.strftime('%Y-%m-%d')
+                            sheet_results.append(item)
+
+                        if sheet_results:
+                            print(f"提取到 {len(sheet_results)} 条记录")
+                            all_results.extend(sheet_results)
+                            # 更新处理日期
+                            if date and rule.get('check_date', False):
+                                self.log_handler.update_process_date(rule_name, date)
+                        else:
+                            print("未提取到数据")
+                except Exception as e:
+                    print(f"处理文件 {excel_file} 时出错: {str(e)}")
+
+            # 如果有数据，按送货日期分组并保存到不同的JSON文件
             if all_results:
+                print(f"总共提取到 {len(all_results)} 条记录")
+                
+                # 获取供应商名称（从规则名称中提取）
+                supplier_name = rule.get('supplier_name', rule_name.split('_')[0])
+                
+                # 按送货日期分组
+                date_groups = {}
+                for item in all_results:
+                    delivery_date = item.get('送货日期')
+                    if delivery_date:
+                        # 转换日期格式从 YYYY-MM-DD 到 YYYYMMDD
+                        date_key = delivery_date.replace('-', '')
+                        if date_key not in date_groups:
+                            date_groups[date_key] = []
+                        date_groups[date_key].append(item)
+                
+                # 确保目录存在
                 json_dir = os.path.join("downloads", "shipping", rule_name)
                 os.makedirs(json_dir, exist_ok=True)
                 
-                json_path = os.path.join(json_dir, "处理结果.json")
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(all_results, f, ensure_ascii=False, indent=2)
-                print(f"成功生成JSON文件: {json_path}")
+                # 确保Summary目录存在
+                summary_dir = os.path.join("downloads", "shipping", "Summary")
+                os.makedirs(summary_dir, exist_ok=True)
+                
+                # 为每个日期组生成单独的JSON文件
+                generated_json_files = []  # 记录生成的JSON文件
+                for date_key, group_data in date_groups.items():
+                    # 构建JSON文件名
+                    json_filename = f"{supplier_name}_{date_key}.json"
+                    json_path = os.path.join(json_dir, json_filename)
+                    
+                    # 保存数据
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(group_data, f, ensure_ascii=False, indent=2)
+                    print(f"成功生成JSON文件: {json_path}，包含 {len(group_data)} 条记录")
+                    generated_json_files.append(json_path)
+                
+                # 移动JSON文件到Summary目录
+                for json_file in generated_json_files:
+                    target_path = os.path.join(summary_dir, os.path.basename(json_file))
+                    try:
+                        # 如果目标文件已存在，先删除
+                        if os.path.exists(target_path):
+                            os.remove(target_path)
+                        # 移动文件
+                        shutil.move(json_file, target_path)
+                        print(f"已移动JSON文件到: {target_path}")
+                    except Exception as e:
+                        print(f"移动JSON文件时出错: {str(e)}")
+
+            # 关闭所有Excel文件连接
+            for file_info in excel_files_info:
+                if file_info['xl'] is not None:
+                    try:
+                        file_info['xl'].close()
+                    except:
+                        pass
+
+            # 删除整个送货单文件夹
+            try:
+                if os.path.exists(excel_dir):
+                    shutil.rmtree(excel_dir)
+                    print(f"已删除文件夹: {excel_dir}")
+                    # 直接返回结果，不再继续处理
+                    return all_results
+            except Exception as e:
+                print(f"删除文件夹时出错: {str(e)}")
+                # 如果删除文件夹失败，尝试删除单个文件
+                for file_info in excel_files_info:
+                    try:
+                        if os.path.exists(file_info['path']):
+                            os.remove(file_info['path'])
+                            print(f"已删除文件: {file_info['path']}")
+                    except Exception as e:
+                        print(f"删除文件时出错: {str(e)}")
 
             return all_results
             

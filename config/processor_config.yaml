@@ -1,0 +1,49 @@
+# 处理器配置文件
+
+# JSON数据格式定义
+json_format:
+  fields:
+    - name: "送货日期"
+      type: "date"
+      required: true
+    - name: "订单号"
+      type: "string"
+      required: true
+    - name: "品名"
+      type: "string"
+      required: true
+    - name: "晶圆名称"
+      type: "string"
+      required: true
+    - name: "晶圆批号"
+      type: "string"
+      required: true
+    - name: "封装形式"
+      type: "string"
+      required: true
+    - name: "数量"
+      type: "integer"
+      required: true
+    - name: "打印批号"
+      type: "string"
+      required: false
+    - name: "供应商"
+      type: "string"
+      required: true
+
+# 文件路径配置
+paths:
+  # 池州华宇
+  池州华宇:
+    excel_archive: "D:/PythonProject/getData/downloads/archive/huayu"
+    json_output: "D:/PythonProject/getData/downloads/shipping/Summary/池州华宇"
+  
+  # 山东汉旗
+  山东汉旗:
+    excel_archive: "D:/PythonProject/getData/downloads/archive/hanqi"
+    json_output: "D:/PythonProject/getData/downloads/shipping/Summary/山东汉旗"
+    
+  # 江苏芯丰
+  江苏芯丰:
+    excel_archive: "D:/PythonProject/getData/downloads/archive/xinfeng"
+    json_output: "D:/PythonProject/getData/downloads/shipping/Summary/江苏芯丰" 

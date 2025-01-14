@@ -3,48 +3,40 @@ import yaml
 from typing import List, Dict, Any, Optional, Pattern
 from models.email_message import EmailMessage
 from utils.log_handler import LogHandler
+import os
 
 class RuleProcessor:
     """规则处理器，负责加载和匹配邮件规则"""
 
-    def __init__(self, rules_file: str = 'email_rules.yaml'):
-        """初始化规则处理器
-        
-        Args:
-            rules_file: 规则配置文件路径
-        """
+    def __init__(self):
+        """初始化规则处理器"""
+        self.rules = self._load_rules()
         self.logger = LogHandler().get_logger('RuleProcessor')
-        self.rules_file = rules_file
-        self.rules: List[Dict[str, Any]] = []
         self._compiled_patterns: Dict[str, List[Pattern]] = {}
         
         try:
-            self.rules = self._load_rules(rules_file)
             self._compile_patterns()
-            self.logger.info("成功初始化规则处理器，加载规则文件: %s", rules_file)
+            self.logger.info("成功初始化规则处理器，加载规则文件: %s", "config/email_rules.yaml")
         except Exception as e:
             self.logger.error("初始化规则处理器失败: %s, 错误: %s", 
-                            rules_file, LogHandler.format_error(e))
+                            "config/email_rules.yaml", LogHandler.format_error(e))
             raise
 
-    def _load_rules(self, rules_file: str) -> List[Dict[str, Any]]:
-        """加载规则配置文件
+    def _load_rules(self) -> dict:
+        """
+        加载邮件规则配置
         
-        Args:
-            rules_file: 规则配置文件路径
-            
-        Returns:
-            List[Dict[str, Any]]: 规则配置列表
+        返回:
+            dict: 规则配置字典
         """
         try:
-            with open(rules_file, 'r', encoding='utf-8') as f:
+            config_path = os.path.join("config", "email_rules.yaml")
+            with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
-            self.logger.info("成功加载规则配置文件: %s", rules_file)
-            return config['rules']
+                return config.get('rules', {})
         except Exception as e:
-            self.logger.error("加载规则配置文件失败: %s, 错误: %s", 
-                            rules_file, LogHandler.format_error(e))
-            raise
+            print(f"加载规则配置失败: {str(e)}")
+            return {}
 
     def _compile_patterns(self):
         """预编译所有正则表达式模式"""

@@ -1,431 +1,716 @@
-import yaml
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Any, Tuple, Optional
 import os
-from datetime import datetime
-import re
-from .log_handler import LogHandler
-import json
 import shutil
+import json
+import yaml
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from utils.log_handler import LogHandler
+from openpyxl import load_workbook
+import xlrd  # 添加 xlrd 导入
 
 class ExcelProcessor:
-    def __init__(self, rules_file: str = 'excel_rules.yaml', log_file: str = 'process_dates.json'):
+    """Excel处理器，负责处理不同供应商的送货单"""
+    
+    def __init__(self):
         """初始化Excel处理器"""
+        self.logger = LogHandler().get_logger('ExcelProcessor')
+        self.config = self._load_config()
+        
+    def _load_config(self) -> dict:
+        """加载配置文件"""
+        config_path = os.path.join("config", "processor_config.yaml")
         try:
-            # 尝试多个可能的路径
-            possible_paths = [
-                rules_file,  # 当前目录
-                os.path.join('config', rules_file),  # config目录
-                os.path.join(os.path.dirname(__file__), '..', rules_file),  # 项目根目录
-                os.path.join(os.path.dirname(__file__), '..', 'config', rules_file)  # config目录（相对于utils）
-            ]
-            
-            rules_path = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    rules_path = path
-                    break
-                    
-            if not rules_path:
-                raise FileNotFoundError(f"找不到规则文件，尝试过的路径: {possible_paths}")
-                
-            self.rules = self._load_rules(rules_path)
-            self.log_handler = LogHandler()
-            self.process_dates_file = log_file
-            print(f"成功加载规则文件: {rules_path}")
-            
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+                self.logger.info("成功加载配置文件")
+                return config
         except Exception as e:
-            print(f"初始化Excel处理器失败: {str(e)}")
-            raise
-
-    def _load_rules(self, rules_file: str) -> Dict[str, Any]:
-        """加载Excel处理规则"""
-        with open(rules_file, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        return config['rules']
-
-    def _extract_date_from_cell(self, df: pd.DataFrame, rule: Dict[str, Any]) -> Optional[datetime]:
-        """从指定单元格提取日期"""
-        date_cell = rule.get('date_cell', {})
-        if not date_cell:
-            print("未配置日期单元格")
-            return None
-
+            self.logger.error("加载配置文件失败: %s", LogHandler.format_error(e))
+            return {}
+            
+    def _save_json(self, data: List[Dict[str, Any]], filename: str, supplier: str):
+        """
+        保存JSON数据到指定位置
+        
+        参数:
+            data: 要保存的数据
+            filename: JSON文件名
+            supplier: 供应商标识
+        """
         try:
-            row = date_cell.get('row', 0)
-            col = ord(date_cell.get('column', 'A').upper()) - ord('A')
+            # 确保输出目录存在
+            output_dir = self.config['paths'][supplier]['json_output']
+            os.makedirs(output_dir, exist_ok=True)
             
-            # 检查索引是否有效
-            if col >= len(df.columns) or row >= len(df):
-                print(f"日期单元格位置无效: 行={row}, 列={col}, DataFrame大小: {len(df)}行 x {len(df.columns)}列")
-                return None
+            # 构建完整的文件路径
+            json_path = os.path.join(output_dir, filename)
             
-            date_str = str(df.iloc[row, col]).strip()
-            print(f"提取到日期字符串: {date_str}")
+            # 保存JSON文件
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+            self.logger.info("JSON数据已保存到: %s", json_path)
+            return json_path
+        except Exception as e:
+            self.logger.error("保存JSON数据失败: %s", LogHandler.format_error(e))
+            return None
             
-            # 如果配置了正则表达式模式，使用它来提取日期
-            pattern = date_cell.get('pattern')
-            if pattern:
-                print(f"使用正则表达式模式: {pattern}")
-                match = re.search(pattern, date_str)
-                if match:
-                    date_str = match.group(1)
-                    print(f"使用正则表达式提取到日期: {date_str}")
+    def _move_excel(self, excel_path: str, supplier: str):
+        """
+        移动Excel文件到指定位置
+        
+        参数:
+            excel_path: Excel文件路径
+            supplier: 供应商标识
+        """
+        try:
+            # 确保归档目录存在
+            archive_dir = self.config['paths'][supplier]['excel_archive']
+            os.makedirs(archive_dir, exist_ok=True)
+            
+            # 构建目标路径
+            filename = os.path.basename(excel_path)
+            target_path = os.path.join(archive_dir, filename)
+            
+            # 移动文件
+            shutil.move(excel_path, target_path)
+            self.logger.info("Excel文件已移动到: %s", target_path)
+            return True
+        except Exception as e:
+            self.logger.error("移动Excel文件失败: %s", LogHandler.format_error(e))
+            return False
+            
+    def _format_date(self, date_str: str, from_format: bool = True) -> Optional[str]:
+        """
+        日期格式转换
+        
+        Args:
+            date_str: 日期字符串
+            from_format: True表示转换为YYYY-MM-DD格式，False表示转换为YYYYMMDD格式
+            
+        Returns:
+            Optional[str]: 转换后的日期字符串，如果转换失败则返回None
+        """
+        try:
+            # 处理特殊情况
+            if date_str in ["0000-00-00", "00000000"]:
+                return "0000-00-00" if from_format else "00000000"
+                
+            if from_format:
+                # 将其他格式转换为YYYY-MM-DD
+                date_formats = [
+                    '%Y%m%d',     # YYYYMMDD
+                    '%Y-%m-%d',   # YYYY-MM-DD
+                    '%Y/%m/%d',   # YYYY/MM/DD
+                    '%Y.%m.%d',   # YYYY.MM.DD
+                    '%Y年%m月%d日' # YYYY年MM月DD日
+                ]
+                
+                for fmt in date_formats:
                     try:
-                        # 处理不同的日期格式
-                        if '/' in date_str:
-                            date_parts = date_str.split('/')
-                            if len(date_parts) == 3:
-                                year = int(date_parts[0])
-                                if year < 100:
-                                    year += 2000
-                                return datetime(year, int(date_parts[1]), int(date_parts[2]))
-                        elif '-' in date_str:
-                            return datetime.strptime(date_str, '%Y-%m-%d')
-                    except ValueError as e:
-                        print(f"日期格式无效: {date_str}, 错误: {str(e)}")
-                        return None
-                else:
-                    print(f"正则表达式未匹配: {date_str}")
-            
-            # 如果没有配置正则表达式或匹配失败，尝试提取数字
-            date_nums = re.findall(r'\d+', date_str)
-            if len(date_nums) >= 3:
-                print(f"从数字中提取日期: {date_nums}")
-                # 确保年份是4位数
-                year = int(date_nums[0])
-                if year < 100:
-                    year += 2000
-                return datetime(year, int(date_nums[1]), int(date_nums[2]))
-            return None
-            
-        except Exception as e:
-            print(f"提取日期时出错: {str(e)}")
-            return None
-
-    def _extract_date_from_sheet(self, sheet_name: str, rule: Dict[str, Any]) -> Optional[datetime]:
-        """从sheet名称提取日期"""
-        sheet_format = rule.get('sheet_format', 'date')
-        print(f"处理sheet: {sheet_name}, 格式: {sheet_format}")
-        
-        if sheet_format == 'date':
-            try:
-                # 移除可能的后缀（如 -2, -3）
-                base_name = re.sub(r'-\d+$', '', sheet_name)
-                print(f"处理sheet名称: {base_name}")
-                # 尝试解析日期
-                return datetime.strptime(base_name, '%Y-%m-%d')
-            except ValueError as e:
-                print(f"解析sheet名称中的日期失败: {str(e)}")
-                return None
-        elif sheet_format == 'number':
-            print(f"数字格式sheet名称: {sheet_name}")
-            # 对于类似 "1-2", "1-2-2" 这样的格式，返回None，使用单元格中的日期
-            return None
-        else:
-            return None
-
-    def _should_process_sheet(self, sheet_name: str, rule: Dict[str, Any], rule_name: str) -> bool:
-        """检查是否应该处理该sheet"""
-        sheet_format = rule.get('sheet_format', 'date')
-        
-        if sheet_format == 'date':
-            # 对于日期格式的sheet名称，检查日期
-            sheet_date = self._extract_date_from_sheet(sheet_name, rule)
-            if not sheet_date:
-                return False
-            return not rule.get('check_date', False) or self.log_handler.should_process_date(rule_name, sheet_date)
-        elif sheet_format == 'number':
-            # 对于数字格式的sheet名称，检查格式是否匹配
-            pattern = rule.get('sheet_pattern', r'^\d+-\d+(-\d+)?$')
-            if not re.match(pattern, sheet_name):
-                return False
-                
-            # 如果启用了日期检查，检查sheet编号是否在上次处理日期之后
-            if rule.get('check_date', False):
-                last_date = self.log_handler.get_last_process_date(rule_name)
-                if last_date:
-                    # 从sheet名称中提取日期编号（例如从"1-9"中提取9）
-                    sheet_day = int(sheet_name.split('-')[1].split('-')[0])
-                    last_day = last_date.day
-                    
-                    print(f"检查sheet日期: sheet_day={sheet_day}, last_day={last_day}")
-                    # 只处理上次处理日期之后的sheet
-                    return sheet_day > last_day
-                    
-            return True
-        elif sheet_format == 'fixed':
-            # 对于固定名称的sheet，检查名称是否匹配
-            return sheet_name == rule.get('sheet_name', '')
-        else:
-            return True
-
-    def _find_data_range(self, df: pd.DataFrame, rule: Dict[str, Any]) -> Tuple[int, int]:
-        """查找数据的起始和结束行"""
-        header_marker = rule.get('header_marker', {})
-        footer_marker = rule.get('footer_marker', {})
-        
-        if not header_marker:
-            return 0, len(df)
-
-        # 查找表头行
-        header_col = header_marker.get('column', 'A')
-        header_value = header_marker.get('value', '')
-        header_col_idx = ord(header_col.upper()) - ord('A')
-        
-        # 获取表尾标记
-        footer_col = footer_marker.get('column', 'A')
-        footer_value = footer_marker.get('value', '')
-        footer_col_idx = ord(footer_col.upper()) - ord('A')
-        
-        start_row = None
-        end_row = None
-        
-        # 遍历查找表头和表尾
-        for idx, row in df.iterrows():
-            # 检查表头
-            if start_row is None:
-                header_cell = str(row[header_col_idx]).strip()
-                if header_value in header_cell:
-                    start_row = idx + 1
-                    continue
-            
-            # 检查表尾
-            if start_row is not None:
-                footer_cell = str(row[footer_col_idx]).strip()
-                # 如果找到表尾标记或空行
-                if (footer_value and footer_value in footer_cell) or \
-                   (not footer_value and (pd.isna(footer_cell) or footer_cell == '')):
-                    end_row = idx
-                    break
-        
-        # 如果没找到明确的结束行，就用最后一行
-        if end_row is None and start_row is not None:
-            end_row = len(df)
-        
-        # 如果没找到表头，使用默认值
-        if start_row is None:
-            start_row = rule.get('default_start_row', 0)
-            end_row = len(df)
-
-        return start_row, end_row
-
-    def _extract_row_data(self, row: pd.Series, fields: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """从一行数据中提取字段"""
-        item = {}
-        for field in fields:
-            field_name = field['name']
-            
-            # 如果是固定值字段
-            if 'value' in field:
-                item[field_name] = field['value']
-                continue
-                
-            # 如果是空列（如送货日期），跳过
-            if not field.get('column'):
-                item[field_name] = ''
-                continue
-                
-            # 从Excel列提取数据
-            col_index = ord(field['column'].upper()) - ord('A')
-            value = row[col_index]
-            
-            # 处理空值和特殊值
-            if pd.isna(value):
-                item[field_name] = ''
+                        date_obj = datetime.strptime(date_str, fmt)
+                        return date_obj.strftime('%Y-%m-%d')
+                    except ValueError:
+                        continue
             else:
-                item[field_name] = str(value).strip()
-        return item
-
-    def process_excel(self, file_path: str, rule_name: str) -> List[Dict[str, Any]]:
-        """处理Excel文件，提取指定字段"""
-        if not os.path.exists(file_path):
-            print(f"文件或目录已被处理，跳过: {file_path}")
-            return []
-            
-        if rule_name not in self.rules:
-            raise ValueError(f"未找到规则: {rule_name}")
-
-        rule = self.rules[rule_name]
-        all_results = []
-        excel_files_info = []  # 记录Excel文件信息
-        
-        try:
-            # 获取目录下所有的Excel文件
-            excel_dir = os.path.dirname(file_path)
-            if not os.path.exists(excel_dir):
-                print(f"目录已被处理，跳过: {excel_dir}")
-                return []
-                
-            excel_files = [f for f in os.listdir(excel_dir) 
-                         if f.lower().endswith(('.xlsx', '.xls'))]
-            print(f"找到 {len(excel_files)} 个Excel文件")
-
-            # 如果没有找到Excel文件，直接返回
-            if not excel_files:
-                print("没有找到Excel文件，跳过处理")
-                return []
-
-            # 处理每个Excel文件
-            for excel_file in excel_files:
-                excel_path = os.path.join(excel_dir, excel_file)
-                if not os.path.exists(excel_path):
-                    print(f"文件已被处理，跳过: {excel_path}")
-                    continue
-                    
-                print(f"\n处理文件: {excel_file}")
-                excel_files_info.append({'path': excel_path, 'xl': None})
-                
+                # 将YYYY-MM-DD转换为YYYYMMDD（用于比较和存储）
                 try:
-                    # 获取所有sheet
-                    xl = pd.ExcelFile(excel_path)
-                    excel_files_info[-1]['xl'] = xl  # 保存ExcelFile对象以便后续关闭
-                    sheet_names = xl.sheet_names
-                    print(f"找到的sheet: {sheet_names}")
-
-                    # 处理每个sheet
-                    for sheet_name in sheet_names:
-                        print(f"\n处理sheet: {sheet_name}")
-                        # 检查是否应该处理该sheet
-                        if not self._should_process_sheet(sheet_name, rule, rule_name):
-                            print(f"跳过sheet: {sheet_name}")
-                            continue
-
-                        # 读取sheet
-                        df = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
-                        
-                        # 提取日期
-                        date = self._extract_date_from_cell(df, rule) or self._extract_date_from_sheet(sheet_name, rule)
-                        if date:
-                            print(f"提取到日期: {date.strftime('%Y-%m-%d')}")
-                        else:
-                            print("未找到日期")
-                        
-                        # 查找数据范围
-                        start_row, end_row = self._find_data_range(df, rule)
-                        print(f"数据范围: {start_row} - {end_row}")
-                        
-                        # 提取数据
-                        sheet_results = []
-                        for idx in range(start_row, end_row):
-                            row = df.iloc[idx]
-                            # 检查是否是有效的数据行
-                            if rule.get('skip_empty', True):
-                                # 找到第一个有效的列名（非空且不是固定值的字段）
-                                valid_field = None
-                                for field in rule['fields']:
-                                    if field.get('column') and not field.get('value'):
-                                        valid_field = field
-                                        break
-                                
-                                if valid_field:
-                                    first_col = ord(valid_field['column'].upper()) - ord('A')
-                                    if pd.isna(row[first_col]) or str(row[first_col]).strip() == '':
-                                        continue
-                            
-                            item = self._extract_row_data(row, rule['fields'])
-                            if date:
-                                item['送货日期'] = date.strftime('%Y-%m-%d')
-                            sheet_results.append(item)
-
-                        if sheet_results:
-                            print(f"提取到 {len(sheet_results)} 条记录")
-                            all_results.extend(sheet_results)
-                            # 更新处理日期
-                            if date and rule.get('check_date', False):
-                                self.log_handler.update_process_date(rule_name, date)
-                        else:
-                            print("未提取到数据")
-                except Exception as e:
-                    print(f"处理文件 {excel_file} 时出错: {str(e)}")
-
-            # 如果有数据，按送货日期分组并保存到不同的JSON文件
-            if all_results:
-                print(f"总共提取到 {len(all_results)} 条记录")
-                
-                # 获取供应商名称（从规则名称中提取）
-                supplier_name = rule.get('supplier_name', rule_name.split('_')[0])
-                
-                # 按送货日期分组
-                date_groups = {}
-                for item in all_results:
-                    delivery_date = item.get('送货日期')
-                    if delivery_date:
-                        # 转换日期格式从 YYYY-MM-DD 到 YYYYMMDD
-                        date_key = delivery_date.replace('-', '')
-                        if date_key not in date_groups:
-                            date_groups[date_key] = []
-                        date_groups[date_key].append(item)
-                
-                # 确保目录存在
-                json_dir = os.path.join("downloads", "shipping", rule_name)
-                os.makedirs(json_dir, exist_ok=True)
-                
-                # 确保Summary目录存在
-                summary_dir = os.path.join("downloads", "shipping", "Summary")
-                os.makedirs(summary_dir, exist_ok=True)
-                
-                # 为每个日期组生成单独的JSON文件
-                generated_json_files = []  # 记录生成的JSON文件
-                for date_key, group_data in date_groups.items():
-                    # 构建JSON文件名
-                    json_filename = f"{supplier_name}_{date_key}.json"
-                    json_path = os.path.join(json_dir, json_filename)
+                    if '-' in date_str:
+                        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                        return date_obj.strftime('%Y%m%d')
+                    else:
+                        date_obj = datetime.strptime(date_str, '%Y%m%d')
+                        return date_str
+                except ValueError:
+                    pass
                     
-                    # 保存数据
-                    with open(json_path, 'w', encoding='utf-8') as f:
-                        json.dump(group_data, f, ensure_ascii=False, indent=2)
-                    print(f"成功生成JSON文件: {json_path}，包含 {len(group_data)} 条记录")
-                    generated_json_files.append(json_path)
-                
-                # 移动JSON文件到Summary目录
-                for json_file in generated_json_files:
-                    target_path = os.path.join(summary_dir, os.path.basename(json_file))
-                    try:
-                        # 如果目标文件已存在，先删除
-                        if os.path.exists(target_path):
-                            os.remove(target_path)
-                        # 移动文件
-                        shutil.move(json_file, target_path)
-                        print(f"已移动JSON文件到: {target_path}")
-                    except Exception as e:
-                        print(f"移动JSON文件时出错: {str(e)}")
-
-            # 关闭所有Excel文件连接
-            for file_info in excel_files_info:
-                if file_info['xl'] is not None:
-                    try:
-                        file_info['xl'].close()
-                    except:
-                        pass
-
-            # 删除整个送货单文件夹
-            try:
-                if os.path.exists(excel_dir):
-                    shutil.rmtree(excel_dir)
-                    print(f"已删除文件夹: {excel_dir}")
-                    # 直接返回结果，不再继续处理
-                    return all_results
-            except Exception as e:
-                print(f"删除文件夹时出错: {str(e)}")
-                # 如果删除文件夹失败，尝试删除单个文件
-                for file_info in excel_files_info:
-                    try:
-                        if os.path.exists(file_info['path']):
-                            os.remove(file_info['path'])
-                            print(f"已删除文件: {file_info['path']}")
-                    except Exception as e:
-                        print(f"删除文件时出错: {str(e)}")
-
-            return all_results
+            self.logger.warning(f"无法解析日期格式: {date_str}")
+            return None
             
         except Exception as e:
-            print(f"处理Excel文件时出错: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
-            raise
+            self.logger.error(f"处理日期时出错: {str(e)}")
+            return None
+            
+    def _compare_dates(self, date1: str, date2: str) -> int:
+        """
+        比较两个日期的大小
+        
+        Args:
+            date1: 第一个日期（YYYY-MM-DD格式）
+            date2: 第二个日期（YYYY-MM-DD格式）
+            
+        Returns:
+            int: 如果date1 > date2返回1，如果date1 < date2返回-1，如果相等返回0
+        """
+        try:
+            # 处理特殊情况
+            if date1 == date2:
+                return 0
+                
+            if date1 == "0000-00-00":
+                return -1
+                
+            if date2 == "0000-00-00":
+                return 1
+                
+            # 转换为YYYYMMDD格式进行比较
+            date1_fmt = self._format_date(date1, False)
+            date2_fmt = self._format_date(date2, False)
+            
+            if not date1_fmt or not date2_fmt:
+                return 0
+                
+            if date1_fmt > date2_fmt:
+                return 1
+            elif date1_fmt < date2_fmt:
+                return -1
+            else:
+                return 0
+                
+        except Exception as e:
+            self.logger.error(f"比较日期时出错: {str(e)}")
+            return 0
+            
+    def _validate_and_format_data(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        验证和格式化数据，确保符合配置文件中定义的格式
+        
+        Args:
+            data: 原始数据字典
+            
+        Returns:
+            Optional[Dict[str, Any]]: 格式化后的数据字典，如果验证失败则返回None
+        """
+        try:
+            # 获取字段定义
+            fields = self.config['json_format']['fields']
+            formatted_data = {}
+            
+            # 验证每个字段
+            for field in fields:
+                field_name = field['name']
+                field_type = field['type']
+                required = field['required']
+                
+                # 获取字段值
+                value = data.get(field_name)
+                
+                # 检查必填字段
+                if required and value is None:
+                    self.logger.error(f"缺少必填字段: {field_name}")
+                    return None
+                    
+                # 如果字段不存在且非必填，使用默认值
+                if value is None:
+                    formatted_data[field_name] = ""
+                    continue
+                    
+                # 根据字段类型进行格式化
+                try:
+                    if field_type == "date":
+                        # 确保日期格式为YYYY-MM-DD
+                        formatted_data[field_name] = self._format_date(str(value))
+                    elif field_type == "integer":
+                        # 确保数字字段为整数
+                        formatted_data[field_name] = int(float(value)) if value else 0
+                    elif field_type == "string":
+                        # 确保字符串字段为字符串类型，并去除首尾空白
+                        formatted_data[field_name] = str(value).strip() if value else ""
+                    else:
+                        formatted_data[field_name] = value
+                except Exception as e:
+                    self.logger.error(f"字段 {field_name} 格式化失败: {str(e)}")
+                    return None
+                    
+            return formatted_data
+            
+        except Exception as e:
+            self.logger.error(f"数据验证和格式化失败: {str(e)}")
+            return None
+            
+    def process_excel(self, download_path: str, rule_name: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        处理指定目录下的所有Excel文件并返回按日期组织的数据字典。
+        
+        Args:
+            download_path: Excel文件所在目录
+            rule_name: 规则名称，用于确定使用哪个供应商的处理逻辑
+            
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: 返回按日期组织的数据字典
+                - 键: 日期字符串(YYYY-MM-DD格式)
+                - 值: 该日期对应的数据记录列表
+        """
+        try:
+            self.logger.info(f"开始处理目录: {download_path}")
+            
+            # 获取供应商标识
+            supplier = rule_name.split("_")[0]
+            
+            # 用于存储所有数据
+            all_data: Dict[str, List[Dict[str, Any]]] = {}
+            
+            # 确保目录存在
+            if not os.path.exists(download_path):
+                self.logger.error(f"目录不存在: {download_path}")
+                return {}
+                
+            # 遍历目录下的所有文件
+            for filename in os.listdir(download_path):
+                file_path = os.path.join(download_path, filename)
+                
+                # 跳过目录
+                if os.path.isdir(file_path):
+                    continue
+                    
+                # 检查文件扩展名
+                if not filename.lower().endswith(('.xls', '.xlsx')):
+                    continue
+                    
+                try:
+                    self.logger.info(f"处理文件: {filename}")
+                    
+                    # 根据供应商选择相应的处理方法
+                    if "池州华宇" in rule_name:
+                        data_dict = self._process_huayu_return_dict(file_path)
+                    elif "山东汉旗" in rule_name:
+                        data_dict = self._process_hanqi_return_dict(file_path)
+                    elif "江苏芯丰" in rule_name:
+                        data_dict = self._process_xinfeng_return_dict(file_path)
+                    else:
+                        self.logger.error("未知的供应商类型")
+                        continue
+                        
+                    # 验证和格式化数据
+                    for date, data_list in data_dict.items():
+                        formatted_list = []
+                        for item in data_list:
+                            formatted_item = self._validate_and_format_data(item)
+                            if formatted_item:
+                                formatted_list.append(formatted_item)
+                                
+                        if formatted_list:
+                            if date in all_data:
+                                all_data[date].extend(formatted_list)
+                            else:
+                                all_data[date] = formatted_list
+                            
+                    # 处理完成后，将文件移动到归档目录
+                    self._move_excel(file_path, supplier)
+                    
+                except Exception as e:
+                    self.logger.error(f"处理文件 {filename} 失败: {str(e)}")
+                    continue
+                    
+            # 保存每个日期的数据到对应的JSON文件
+            if all_data:
+                json_output_dir = self.config['paths'][supplier]['json_output']
+                os.makedirs(json_output_dir, exist_ok=True)
+                
+                for date, data_list in all_data.items():
+                    try:
+                        json_filename = f"{supplier}送货单_{date}.json"
+                        json_path = os.path.join(json_output_dir, json_filename)
+                        
+                        with open(json_path, 'w', encoding='utf-8') as f:
+                            json.dump(data_list, f, ensure_ascii=False, indent=2)
+                            
+                        self.logger.info(f"已保存JSON数据到: {json_path}")
+                        
+                    except Exception as e:
+                        self.logger.error(f"保存JSON数据失败: {str(e)}")
+                        continue
+                        
+            return all_data
+            
+        except Exception as e:
+            self.logger.error(f"处理Excel文件失败: {str(e)}")
+            return {}
+            
+    def _process_huayu_return_dict(self, excel_path: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        处理池州华宇的送货单Excel文件并返回数据字典
+        
+        处理说明:
+        1. 固定读取'Page 1'工作表
+        2. 日期位置固定在P4单元格
+        3. 从第7行开始读取数据，直到遇到'TOTAL'行
+        
+        Args:
+            excel_path: Excel文件路径
+            
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: 按日期组织的数据字典
+        """
+        try:
+            # 加载Excel工作簿，data_only=True表示读取值而不是公式
+            wb = load_workbook(excel_path, data_only=True)
+            sheet = wb['Page 1']  # 固定使用Page 1工作表
+            
+            data_dict = {}
+            # 从固定位置(P4)获取日期
+            date_str = sheet['P4'].value
+            delivery_date = self._format_date(str(date_str))
+            
+            if not delivery_date:
+                self.logger.error("无法获取送货日期，跳过处理")
+                return {}
+                
+            data_list = []
+            
+            # 从第8行开始遍历数据，直到遇到TOTAL行
+            for row in range(8, sheet.max_row + 1):
+                # 检查是否到达表格末尾（TOTAL行）
+                if sheet[f'N{row}'].value == 'TOTAL':
+                    break
+                    
+                # 跳过空行（以订单号是否存在为判断依据）
+                if not sheet[f'D{row}'].value:
+                    continue
+                    
+                try:
+                    # 提取每行数据并构建数据字典
+                    row_data = {
+                        "送货日期": delivery_date,
+                        "订单号": sheet[f'D{row}'].value,
+                        "品名": sheet[f'F{row}'].value,
+                        "封装形式": sheet[f'K{row}'].value,
+                        "打印批号": sheet[f'J{row}'].value,
+                        "数量": int(sheet[f'Q{row}'].value or 0),  # 如果为空则默认为0
+                        "晶圆名称": sheet[f'O{row}'].value,
+                        "晶圆批号": sheet[f'L{row}'].value,
+                        "供应商": "池州华宇"
+                    }
+                    data_list.append(row_data)
+                except Exception as e:
+                    self.logger.error(f"处理第 {row} 行数据时出错: {str(e)}")
+                    continue
+                    
+            # 如果有数据，则添加到返回字典中
+            if data_list:
+                data_dict[delivery_date] = data_list
+                
+            return data_dict
+            
+        except Exception as e:
+            self.logger.error(f"处理池州华宇送货单失败: {str(e)}")
+            return {}
+            
+    def _get_last_process_date(self, supplier: str) -> str:
+        """
+        获取供应商最后一次处理的送货日期
+        
+        Args:
+            supplier: 供应商标识
+            
+        Returns:
+            str: 最后处理的日期（YYYYMMDD格式），如果没有记录则返回'00000000'
+        """
+        try:
+            # 读取记录文件
+            process_dates_file = os.path.join("config", "process_dates.json")
+            if not os.path.exists(process_dates_file):
+                # 如果文件不存在，创建默认内容
+                default_content = {"山东汉旗": "0000-00-00", "池州华宇": "0000-00-00", "江苏芯丰": "0000-00-00"}
+                with open(process_dates_file, 'w', encoding='utf-8') as f:
+                    json.dump(default_content, f, ensure_ascii=False, indent=2)
+                return "0000-00-00"
+                
+            # 读取日期记录
+            with open(process_dates_file, 'r', encoding='utf-8') as f:
+                dates = json.load(f)
+                return dates.get(supplier, "0000-00-00")
+                
+        except Exception as e:
+            self.logger.error(f"获取最后处理日期失败: {str(e)}")
+            return "0000-00-00"
+            
+    def _update_last_process_date(self, supplier: str, date: str) -> bool:
+        """
+        更新供应商最后一次处理的送货日期
+        
+        Args:
+            supplier: 供应商标识
+            date: 新的处理日期（YYYY-MM-DD格式）
+            
+        Returns:
+            bool: 更新成功返回True，失败返回False
+        """
+        try:
+            process_dates_file = os.path.join("config", "process_dates.json")
+            
+            # 读取现有记录
+            with open(process_dates_file, 'r', encoding='utf-8') as f:
+                dates = json.load(f)
+                
+            # 更新日期
+            current_date = dates.get(supplier, "0000-00-00")
+            # 转换为YYYYMMDD格式进行比较
+            if self._format_date(date, False) > self._format_date(current_date, False):
+                dates[supplier] = date
+                
+                # 保存更新后的记录
+                with open(process_dates_file, 'w', encoding='utf-8') as f:
+                    json.dump(dates, f, ensure_ascii=False, indent=2)
+                    
+                self.logger.info(f"已更新{supplier}的最后处理日期: {date}")
+                return True
+                
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"更新最后处理日期失败: {str(e)}")
+            return False
+            
+    def _is_xls_file(self, file_path: str) -> bool:
+        """
+        检查文件是否为旧版 .xls 格式
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            bool: 如果是 .xls 文件返回 True，否则返回 False
+        """
+        return file_path.lower().endswith('.xls')
 
-    def get_rule_names(self) -> List[str]:
-        """获取所有规则名称"""
-        return list(self.rules.keys()) 
+    def _process_hanqi_return_dict(self, excel_path: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        处理山东汉旗的送货单Excel文件并返回数据字典
+        
+        处理说明:
+        1. 遍历所有工作表
+        2. 每个工作表的日期位置在G3单元格，格式为"日期:YYYY-MM-DD"
+        3. 从第6行开始读取数据，直到遇到'Total'行
+        4. 只处理日期大于上次处理日期的数据
+        5. 支持旧版 .xls 和新版 .xlsx 格式
+        
+        Args:
+            excel_path: Excel文件路径
+            
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: 按日期组织的数据字典
+        """
+        try:
+            # 获取最后处理日期
+            last_process_date = self._get_last_process_date("山东汉旗")
+            self.logger.info(f"山东汉旗最后处理日期: {last_process_date}")
+            
+            data_dict = {}
+            max_processed_date = last_process_date  # 用于记录本次处理的最大日期
+
+            if self._is_xls_file(excel_path):
+                # 使用 xlrd 处理 .xls 文件
+                workbook = xlrd.open_workbook(excel_path)
+                
+                # 遍历所有工作表
+                for sheet in workbook.sheets():
+                    # 获取日期单元格内容 (G3 对应的是 row=2, col=6)
+                    date_cell = sheet.cell_value(2, 6)
+                    
+                    # 检查日期单元格格式是否正确
+                    if not date_cell or '日期：' not in str(date_cell):
+                        continue
+                        
+                    # 提取并转换日期
+                    delivery_date = self._format_date(str(date_cell).split('日期：')[-1].strip())
+                    if not delivery_date:
+                        continue
+                        
+                    # 检查日期是否大于最后处理日期
+                    if self._compare_dates(delivery_date, last_process_date) <= 0:
+                        self.logger.info(f"跳过已处理的日期: {delivery_date}")
+                        continue
+                        
+                    # 更新最大处理日期
+                    if self._compare_dates(delivery_date, max_processed_date) > 0:
+                        max_processed_date = delivery_date
+                        
+                    data_list = []
+                    
+                    # 从第7行开始读取数据 (索引从0开始，所以是6)
+                    for row in range(6, sheet.nrows):
+                        # 检查是否到达表格末尾（Total行）
+                        if 'Total' in str(sheet.cell_value(row, 7)):  # H列对应索引7
+                            break
+                        # 跳过空行
+                        if not sheet.cell_value(row, 4):  # E列对应索引4
+                            continue
+                            
+                        try:
+                            # 提取每行数据
+                            row_data = {
+                                "送货日期": delivery_date,
+                                "订单号": str(sheet.cell_value(row, 4)),  # E列
+                                "品名": str(sheet.cell_value(row, 2)),    # C列
+                                "封装形式": str(sheet.cell_value(row, 7)), # H列
+                                "打印批号": str(sheet.cell_value(row, 5)), # F列
+                                "数量": int(float(sheet.cell_value(row, 8)) or 0),  # I列
+                                "晶圆名称": str(sheet.cell_value(row, 1)), # B列
+                                "晶圆批号": str(sheet.cell_value(row, 3)), # D列
+                                "供应商": "山东汉旗"
+                            }
+                            data_list.append(row_data)
+                        except Exception as e:
+                            self.logger.error(f"处理第 {row + 1} 行数据时出错: {str(e)}")
+                            continue
+                            
+                    # 合并相同日期的数据
+                    if data_list:
+                        if delivery_date in data_dict:
+                            data_dict[delivery_date].extend(data_list)
+                        else:
+                            data_dict[delivery_date] = data_list
+            else:
+                # 使用 openpyxl 处理 .xlsx 文件
+                wb = load_workbook(excel_path, data_only=True)
+                
+                # 遍历所有工作表
+                for sheet_name in wb.sheetnames:
+                    sheet = wb[sheet_name]
+                    # 获取日期单元格内容
+                    date_cell = sheet['G3'].value
+                    
+                    # 检查日期单元格格式是否正确
+                    if not date_cell or '日期:' not in str(date_cell):
+                        continue
+                        
+                    # 提取并转换日期
+                    delivery_date = self._format_date(str(date_cell).split('日期:')[-1].strip())
+                    if not delivery_date:
+                        continue
+                        
+                    # 检查日期是否大于最后处理日期
+                    if self._compare_dates(delivery_date, last_process_date) <= 0:
+                        self.logger.info(f"跳过已处理的日期: {delivery_date}")
+                        continue
+                        
+                    # 更新最大处理日期
+                    if self._compare_dates(delivery_date, max_processed_date) > 0:
+                        max_processed_date = delivery_date
+                        
+                    data_list = []
+                    
+                    # 从第6行开始读取数据
+                    for row in range(6, sheet.max_row + 1):
+                        # 检查是否到达表格末尾（Total行）
+                        if sheet[f'H{row}'].value == 'Total':
+                            break
+                            
+                        # 跳过空行
+                        if not sheet[f'E{row}'].value:
+                            continue
+                            
+                        try:
+                            # 提取每行数据
+                            row_data = {
+                                "送货日期": delivery_date,
+                                "订单号": sheet[f'E{row}'].value,
+                                "品名": sheet[f'C{row}'].value,
+                                "封装形式": sheet[f'H{row}'].value,
+                                "打印批号": sheet[f'F{row}'].value,
+                                "数量": int(sheet[f'I{row}'].value or 0),
+                                "晶圆名称": sheet[f'B{row}'].value,
+                                "晶圆批号": sheet[f'D{row}'].value,
+                                "供应商": "山东汉旗"
+                            }
+                            data_list.append(row_data)
+                        except Exception as e:
+                            self.logger.error(f"处理第 {row} 行数据时出错: {str(e)}")
+                            continue
+                            
+                    # 合并相同日期的数据
+                    if data_list:
+                        if delivery_date in data_dict:
+                            data_dict[delivery_date].extend(data_list)
+                        else:
+                            data_dict[delivery_date] = data_list
+                            
+            # 更新最后处理日期
+            if self._compare_dates(max_processed_date, last_process_date) > 0:
+                self._update_last_process_date("山东汉旗", max_processed_date)
+                self.logger.info(f"更新山东汉旗最后处理日期为: {max_processed_date}")
+                
+            return data_dict
+            
+        except Exception as e:
+            self.logger.error(f"处理山东汉旗送货单失败: {str(e)}")
+            return {}
+            
+    def _process_xinfeng_return_dict(self, excel_path: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        处理江苏芯丰的送货单Excel文件并返回数据字典
+        
+        处理说明:
+        1. 遍历所有工作表
+        2. 每个工作表的日期位置在L2单元格，格式为"出货日期:YYYY-MM-DD"
+        3. 从第9行开始读取数据，直到遇到空行
+        
+        Args:
+            excel_path: Excel文件路径
+            
+        Returns:
+            Dict[str, List[Dict[str, Any]]]: 按日期组织的数据字典
+        """
+        try:
+            # 加载Excel工作簿
+            wb = load_workbook(excel_path, data_only=True)
+            data_dict = {}
+            
+            # 遍历所有工作表
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                # 获取日期单元格内容
+                date_cell = sheet['L2'].value
+                
+                # 检查日期单元格格式是否正确
+                if not date_cell or '出货日期:' not in str(date_cell):
+                    continue
+                    
+                # 提取并转换日期
+                delivery_date = self._format_date(str(date_cell).split('出货日期:')[-1].strip())
+                if not delivery_date:
+                    continue
+                    
+                data_list = []
+                
+                # 从第9行开始读取数据
+                for row in range(9, sheet.max_row + 1):
+                    # 检查是否到达表格末尾（空行）
+                    if not sheet[f'A{row}'].value:
+                        break
+                        
+                    # 跳过空行
+                    if not sheet[f'C{row}'].value:
+                        continue
+                        
+                    try:
+                        # 提取每行数据
+                        row_data = {
+                            "送货日期": delivery_date,
+                            "订单号": sheet[f'C{row}'].value,
+                            "品名": sheet[f'D{row}'].value,
+                            "封装形式": sheet[f'E{row}'].value,
+                            "打印批号": "",  # 芯丰没有打印批号字段
+                            "数量": int(sheet[f'H{row}'].value or 0),
+                            "晶圆名称": sheet[f'F{row}'].value,
+                            "晶圆批号": sheet[f'G{row}'].value,
+                            "供应商": "江苏芯丰"
+                        }
+                        data_list.append(row_data)
+                    except Exception as e:
+                        self.logger.error(f"处理第 {row} 行数据时出错: {str(e)}")
+                        continue
+                        
+                # 合并相同日期的数据
+                if data_list:
+                    if delivery_date in data_dict:
+                        data_dict[delivery_date].extend(data_list)
+                    else:
+                        data_dict[delivery_date] = data_list
+                        
+            return data_dict
+            
+        except Exception as e:
+            self.logger.error(f"处理江苏芯丰送货单失败: {str(e)}")
+            return {}

@@ -10,28 +10,28 @@ rules:
     attachment_name_pattern: ["^苏州华芯微电子股份有限公司的封装产品进展表.*\\.xlsx?$"]
     download_path: "downloads/wip/池州华宇进度表"
 
-  - name: "池州华宇送货单"
+  - name: "池州华宇_送货单"
     subject_contains: ["^苏州华芯封装产品送货单\\d+\\.\\d+$"]
     sender_contains: ["czmk4@hisemi.com.cn"]
     receiver_contains: ["wanghq@h-sun.com"]
     attachment_name_pattern: ["^\\d{2}-\\d{2}\\s+008\\s+\\d{2}\\.xlsx?$"]
     download_path: "downloads/shipping/池州华宇送货单"
 
-  - name: "汉旗进度表"
+  - name: "山东汉旗进度表"
     subject_contains: ["^华芯微WIP$"]
     sender_contains: ["a13589601455@163.com"]
     receiver_contains: ["fanlm@h-sun.com", "wanghq@h-sun.com", "wxb1@h-sun.com", "test2@h-sun.com", "cangk2@h-sun.com", "fuyanju_2020@163.com"]
     attachment_name_pattern: ["^华芯微WIP\\.xlsx?$"]
     download_path: "downloads/wip/汉旗进度表"
 
-  - name: "汉旗送货单"
+  - name: "山东汉旗_送货单"
     subject_contains: ["^华芯微\\d+月份出货单\\(\\d+\\)$"]
     sender_contains: ["a13589601455@163.com"]
     receiver_contains: ["fuyanju_2020@163.com"]
     attachment_name_pattern: ["^华芯微\\d+月份出货单\\(\\d+\\)\\.xls$"]
     download_path: "downloads/shipping/汉旗送货单"
 
-  - name: "芯丰送货单"
+  - name: "江苏芯丰_送货单"
     subject_contains: ["^314 成品出货通知 \\d{1,2}/\\d{1,2}$"]
     sender_contains: ["cs01@icpkg.com"]
     receiver_contains: ["fanlm@h-sun.com", "wanghq@h-sun.com", "wxb1@h-sun.com", "cangk2@h-sun.com"]

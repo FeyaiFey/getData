@@ -18,9 +18,9 @@ class FileHandler:
         try:
             if not os.path.exists(directory):
                 os.makedirs(directory)
-                cls.logger.debug("创建目录: {}", directory)
+                cls.logger.debug("创建目录: %s", directory)
         except Exception as e:
-            cls.logger.error("创建目录失败: {}, 错误: {}", 
+            cls.logger.error("创建目录失败: %s, 错误: %s", 
                            directory, LogHandler.format_error(e))
             raise
     
@@ -69,10 +69,10 @@ class FileHandler:
                 else:
                     f.write(content.read())
                     
-            cls.logger.debug("文件保存成功: {}", filepath)
+            cls.logger.debug("文件保存成功: %s", filepath)
             
         except Exception as e:
-            cls.logger.error("保存文件失败: {}, 错误: {}", 
+            cls.logger.error("保存文件失败: %s, 错误: %s", 
                            filepath, LogHandler.format_error(e))
             raise
     
@@ -89,6 +89,6 @@ class FileHandler:
         try:
             return os.path.getsize(filepath)
         except Exception as e:
-            cls.logger.error("获取文件大小失败: {}, 错误: {}", 
+            cls.logger.error("获取文件大小失败: %s, 错误: %s", 
                            filepath, LogHandler.format_error(e))
             return 0 

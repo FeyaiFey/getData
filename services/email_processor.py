@@ -4,6 +4,7 @@ from services.rule_processor import RuleProcessor
 from utils.log_handler import LogHandler
 from models.email_message import EmailMessage
 from utils.excel_processor import ExcelProcessor
+from run_gui import process_delivery_orders
 
 class EmailProcessor:
     """
@@ -142,7 +143,13 @@ class EmailProcessor:
                             # 处理指定目录下的所有Excel文件
                             data_dict = excel_processor.process_excel(rule["download_path"], rule["name"])
                             if data_dict:
-                                self.logger.info(f"成功处理 {rule['name']} 的Excel文件")
+                                self.logger.info("成功处理 %s 的Excel文件", rule["name"])
+                                
+                                # 处理送货单数据
+                                if process_delivery_orders(data_dict):
+                                    self.logger.info("成功完成 %s 的送货单录入", rule["name"])
+                                else:
+                                    self.logger.error("处理 %s 的送货单录入失败", rule["name"])
                             
                         except Exception as e:
                             self.logger.error(f"处理Excel文件失败: {str(e)}")

@@ -148,6 +148,7 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
                 screenshot_dir = Path("screenshots")
                 screenshot_dir.mkdir(exist_ok=True)
                 # 保存截图
+                
                 screenshot_path = screenshot_dir / f"error_{timestamp}.png"
                 screenshot = pyautogui.screenshot()
                 screenshot.save(screenshot_path)
@@ -158,6 +159,7 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
                 pyautogui.hotkey('ctrl', 'd')
                 time.sleep(1)
                 if processor.locate_and_click_template("yes"):
+
                     logger.info("已删除此行")
                 else:
                     logger.error("删除失败")
@@ -176,6 +178,14 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
         else:
             logger.error("审核失败")
         time.sleep(1)
+
+        # 点击确定
+        if processor.locate_and_click_template("confirm"):
+            logger.info("已确定")
+        else:
+            logger.error("确定失败")
+        time.sleep(1)
+
         pyautogui.hotkey('alt', 'f4')
 
         # 关闭维护到货单窗口
@@ -188,7 +198,9 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
 
         # 关闭E10
         if processor._setup_window(processor.ERP_WINDOW):
-            pyautogui.hotkey('alt', 'f4')
+            pyautogui.hotkey('alt', 'space')
+            pyautogui.press('c')
+            pyautogui.press('y')
             logger.info("已关闭E10")
             time.sleep(1)
         else:

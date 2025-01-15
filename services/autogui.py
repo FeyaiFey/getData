@@ -16,6 +16,7 @@ class AutoGuiProcessor:
     ERP_WINDOW = '鼎捷ERP E10 [华芯微正式|xinxf|苏州华芯微电子股份有限公司|华芯微工厂|华芯微销售域|华芯微公司采购域]'
     RECEIPT_WINDOW = '浏览 - 维护到货单'
     NEW_RECEIPT_WINDOW = '维护到货单'
+    AUDIT_WINDOW = '审核'
     
     # 模板配置
     TEMPLATES = {
@@ -37,6 +38,7 @@ class AutoGuiProcessor:
         're_login_quit': 're_login_quit.png',
         'audit': 'audit.png',
         'save': 'save.png',
+        'confirm': 'confirm.png',
     }
     
     def __init__(self, data_dict: Dict[str, List[Dict[str, Any]]] = None):

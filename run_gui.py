@@ -152,7 +152,7 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
                 screenshot = pyautogui.screenshot()
                 screenshot.save(screenshot_path)
                 logger.warning("检测到报错窗口,已保存截图: %s", screenshot_path)
-                center_x,center_y = locate_template("receipt_error")
+                center_x,center_y = processor.locate_template("receipt_error")
                 pyautogui.click(23,center_y)
                 time.sleep(1)
                 pyautogui.hotkey('ctrl', 'd')

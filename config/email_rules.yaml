@@ -25,7 +25,7 @@ rules:
     download_path: "downloads/wip/汉旗进度表"
 
   - name: "山东汉旗_送货单"
-    subject_contains: ["^华芯微\\d+月份出货单\\(\\d+\\)$"]
+    subject_contains: ["^华芯微\\d+月份出货单(\\(\\d+\\))?$"]
     sender_contains: ["a13589601455@163.com"]
     receiver_contains: ["fuyanju_2020@163.com"]
     attachment_name_pattern: ["^华芯微\\d+月份出货单\\(\\d+\\)\\.xls$"]

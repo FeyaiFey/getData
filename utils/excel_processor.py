@@ -99,22 +99,30 @@ class ExcelProcessor:
             if from_format:
                 # 将其他格式转换为YYYY-MM-DD
                 date_formats = [
-                    '%Y%m%d',     # YYYYMMDD
-                    '%Y-%m-%d',   # YYYY-MM-DD
-                    '%Y/%m/%d',   # YYYY/MM/DD
-                    '%Y.%m.%d',   # YYYY.MM.DD
-                    '%Y年%m月%d日' # YYYY年MM月DD日
+                    '%Y%m%d',           # YYYYMMDD
+                    '%Y-%m-%d',         # YYYY-MM-DD
+                    '%Y/%m/%d',         # YYYY/MM/DD
+                    '%Y.%m.%d',         # YYYY.MM.DD
+                    '%Y年%m月%d日',      # YYYY年MM月DD日
+                    '%Y-%m-%d %H:%M:%S', # YYYY-MM-DD HH:MM:SS
+                    '%Y/%m/%d %H:%M:%S', # YYYY/MM/DD HH:MM:SS
+                    '%Y-%m-%d %H:%M',    # YYYY-MM-DD HH:MM
+                    '%Y/%m/%d %H:%M'     # YYYY/MM/DD HH:MM
                 ]
                 
                 for fmt in date_formats:
                     try:
-                        date_obj = datetime.strptime(date_str, fmt)
+                        date_obj = datetime.strptime(str(date_str).strip(), fmt)
                         return date_obj.strftime('%Y-%m-%d')
                     except ValueError:
                         continue
             else:
                 # 将YYYY-MM-DD转换为YYYYMMDD（用于比较和存储）
                 try:
+                    # 如果包含时间，先提取日期部分
+                    if ' ' in str(date_str):
+                        date_str = str(date_str).split(' ')[0]
+                        
                     if '-' in date_str:
                         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
                         return date_obj.strftime('%Y%m%d')
@@ -124,11 +132,11 @@ class ExcelProcessor:
                 except ValueError:
                     pass
                     
-            self.logger.warning(f"无法解析日期格式: {date_str}")
+            self.logger.warning("无法解析日期格式: %s", date_str)
             return None
             
         except Exception as e:
-            self.logger.error(f"处理日期时出错: {str(e)}")
+            self.logger.error("处理日期时出错: %s", LogHandler.format_error(e))
             return None
             
     def _compare_dates(self, date1: str, date2: str) -> int:
@@ -642,8 +650,8 @@ class ExcelProcessor:
         处理江苏芯丰的送货单Excel文件并返回数据字典
         
         处理说明:
-        1. 遍历所有工作表
-        2. 每个工作表的日期位置在L2单元格，格式为"出货日期:YYYY-MM-DD"
+        1. 读取第一个工作表
+        2. 日期位置固定在L3单元格
         3. 从第9行开始读取数据，直到遇到空行
         
         Args:
@@ -653,64 +661,52 @@ class ExcelProcessor:
             Dict[str, List[Dict[str, Any]]]: 按日期组织的数据字典
         """
         try:
-            # 加载Excel工作簿
+            # 加载Excel工作簿，data_only=True表示读取值而不是公式
             wb = load_workbook(excel_path, data_only=True)
-            data_dict = {}
+            sheet = wb.active  # 获取第一个工作表
             
-            # 遍历所有工作表
-            for sheet_name in wb.sheetnames:
-                sheet = wb[sheet_name]
-                # 获取日期单元格内容
-                date_cell = sheet['L2'].value
+            data_dict = {}
+            # 从固定位置(L3)获取日期
+            date_str = sheet['L3'].value
+            delivery_date = self._format_date(str(date_str))
+            
+            if not delivery_date:
+                self.logger.error("无法获取送货日期，跳过处理")
+                return {}
                 
-                # 检查日期单元格格式是否正确
-                if not date_cell or '出货日期:' not in str(date_cell):
+            data_list = []
+            
+            # 从第9行开始遍历数据，直到遇到空行
+            for row in range(9, sheet.max_row + 1):
+                # 检查是否到达空行
+                if not any(sheet[f'{col}{row}'].value for col in ['A','B','C','D','E']):
+                    break
+                    
+                try:
+                    # 提取每行数据并构建数据字典
+                    row_data = {
+                        "送货日期": delivery_date,
+                        "订单号": sheet[f'D{row}'].value,
+                        "品名": sheet[f'E{row}'].value,
+                        "封装形式": sheet[f'F{row}'].value,
+                        "打印批号": sheet[f'N{row}'].value,
+                        "数量": int(sheet[f'I{row}'].value or 0),  # 如果为空则默认为0
+                        "晶圆名称": sheet[f'G{row}'].value,
+                        "晶圆批号": sheet[f'H{row}'].value,
+                        "供应商": "江苏芯丰"
+                    }
+                    data_list.append(row_data)
+                except Exception as e:
+                    self.logger.error(f"处理第 {row} 行数据时出错: {str(e)}")
                     continue
                     
-                # 提取并转换日期
-                delivery_date = self._format_date(str(date_cell).split('出货日期:')[-1].strip())
-                if not delivery_date:
-                    continue
-                    
-                data_list = []
+            # 如果有数据，则添加到返回字典中
+            if data_list:
+                data_dict[delivery_date] = data_list
                 
-                # 从第9行开始读取数据
-                for row in range(9, sheet.max_row + 1):
-                    # 检查是否到达表格末尾（空行）
-                    if not sheet[f'A{row}'].value:
-                        break
-                        
-                    # 跳过空行
-                    if not sheet[f'C{row}'].value:
-                        continue
-                        
-                    try:
-                        # 提取每行数据
-                        row_data = {
-                            "送货日期": delivery_date,
-                            "订单号": sheet[f'C{row}'].value,
-                            "品名": sheet[f'D{row}'].value,
-                            "封装形式": sheet[f'E{row}'].value,
-                            "打印批号": "",  # 芯丰没有打印批号字段
-                            "数量": int(sheet[f'H{row}'].value or 0),
-                            "晶圆名称": sheet[f'F{row}'].value,
-                            "晶圆批号": sheet[f'G{row}'].value,
-                            "供应商": "江苏芯丰"
-                        }
-                        data_list.append(row_data)
-                    except Exception as e:
-                        self.logger.error(f"处理第 {row} 行数据时出错: {str(e)}")
-                        continue
-                        
-                # 合并相同日期的数据
-                if data_list:
-                    if delivery_date in data_dict:
-                        data_dict[delivery_date].extend(data_list)
-                    else:
-                        data_dict[delivery_date] = data_list
-                        
             return data_dict
             
         except Exception as e:
             self.logger.error(f"处理江苏芯丰送货单失败: {str(e)}")
             return {}
+            

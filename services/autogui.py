@@ -30,6 +30,13 @@ class AutoGuiProcessor:
         'receipt_businessQty': 'receipt_businessQty.png',
         'receipt_region_paste': 'receipt_region_paste.png',
         'receipt_supply': 'receipt_supply.png',
+        'receipt_warning': 'receipt_warning.png',
+        'yes': 'yes.png',
+        'no': 'no.png',
+        'warning': 'warning.png',
+        're_login_quit': 're_login_quit.png',
+        'audit': 'audit.png',
+        'save': 'save.png',
     }
     
     def __init__(self, data_dict: Dict[str, List[Dict[str, Any]]] = None):
@@ -173,20 +180,26 @@ class AutoGuiProcessor:
         Returns:
             bool: 是否成功设置窗口
         """
-        try:
-            hwnd = win32gui.FindWindow(None, window_title)
-            if hwnd:
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
-                win32gui.SetForegroundWindow(hwnd)
-                time.sleep(1)
-                return True
-            else:
-                self.logger.warning("未找到窗口: %s", window_title)
-                return False
-        except Exception as e:
-            self.logger.error("设置窗口状态失败: %s", LogHandler.format_error(e))
-            return False
+        for i in range(3):
+            try:
+                time.sleep(2)
+                hwnd = win32gui.FindWindow(None, window_title)
+                if hwnd:
+                    # win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+                    win32gui.SetForegroundWindow(hwnd)
+                    return True
+                else:
+                    self.logger.warning("第%d次尝试未找到窗口: %s", i+1, window_title)
+                    if i < 2:  # 不是最后一次尝试时才打印重试信息
+                        self.logger.info("2秒后进行第%d次重试", i+2)
+            except Exception as e:
+                self.logger.error("第%d次设置窗口状态失败: %s", i+1, LogHandler.format_error(e))
+                if i < 2:  # 不是最后一次尝试时才打印重试信息
+                    self.logger.info("2秒后进行第%d次重试", i+2)
+
+        self.logger.error("设置窗口状态失败,已重试3次")
+        return False
 
     def check_and_setup_digiwin(self) -> bool:
         """检查并设置鼎捷ERP窗口

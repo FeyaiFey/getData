@@ -4,6 +4,8 @@ from typing import List, Tuple, Dict, Any
 import pyautogui
 import time
 import pyperclip
+from datetime import datetime
+from pathlib import Path
 
 def execute_step(processor: AutoGuiProcessor, logger: LogHandler, 
                 step_name: str, template_name: str, window_title: str, 
@@ -89,12 +91,11 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
 
         
         # 定位并输入备注
-        if not processor.locate_and_click_template("receipt_remark", 
-                                                 window_title=processor.NEW_RECEIPT_WINDOW):
+        if not processor.locate_and_click_template("receipt_remark"):
             logger.error("定位备注输入框失败")
             return False
         time.sleep(1)
-        pyperclip.copy(f"{supplier}-{date}")
+        pyperclip.copy(f"{supplier} {date}")
         pyautogui.hotkey('ctrl', 'v')
         time.sleep(1)
         pyautogui.press('enter')
@@ -104,26 +105,27 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
         if processor.locate_template("receipt_resource_id"):
             # 点击订单号输入区域
             pyautogui.click(175, 479)
+            time.sleep(1)
             # 复制并粘贴订单号
-            order_numbers = "\n".join([item["订单号"] for item in data])
+            order_numbers = "\r\n".join([item["订单号"] for item in data])
             pyperclip.copy(order_numbers)
             # 右键点击
+            print(f"订单号: {order_numbers}")
             pyautogui.click(175, 479, button='right')
             # 点击粘贴区域
-            if not processor.locate_and_click_template("receipt_region_paste"):
+            if not processor.locate_and_click_template("receipt_region_paste",wait_time=5):
                 logger.error("定位粘贴区域失败")
                 return False
-            time.sleep(5)
         else:
             logger.error("定位订单号模板失败")
             return False
-            
+  
         # 处理数量
         if processor.locate_template("receipt_businessQty"):
             # 点击数量输入区域
             pyautogui.click(961, 479)
             # 复制并粘贴数量
-            quantities = "\n".join([str(item["数量"]) for item in data])
+            quantities = "\r\n".join([str(item["数量"]) for item in data])
             pyperclip.copy(quantities)
             # 右键点击
             pyautogui.click(961, 479, button='right')
@@ -135,9 +137,66 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
         else:
             logger.error("定位数量模板失败")
             return False
-            
-        return True
         
+        # 确认是否报错
+        while processor.locate_and_click_template("receipt_error",click=False):
+            # 截图并保存
+            try:
+                # 获取当前时间作为文件名
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                # 创建screenshots目录(如果不存在)
+                screenshot_dir = Path("screenshots")
+                screenshot_dir.mkdir(exist_ok=True)
+                # 保存截图
+                screenshot_path = screenshot_dir / f"error_{timestamp}.png"
+                screenshot = pyautogui.screenshot()
+                screenshot.save(screenshot_path)
+                logger.warning("检测到报错窗口,已保存截图: %s", screenshot_path)
+                center_x,center_y = locate_template("receipt_error")
+                pyautogui.click(23,center_y)
+                time.sleep(1)
+                pyautogui.hotkey('ctrl', 'd')
+                time.sleep(1)
+                if processor.locate_and_click_template("yes"):
+                    logger.info("已删除此行")
+                else:
+                    logger.error("删除失败")
+            except Exception as e:
+                logger.error("保存报错截图失败: %s", LogHandler.format_error(e))
+        
+        # 点击保存
+        if processor.locate_and_click_template("save"):
+            logger.info("已保存")
+        else:
+            logger.error("保存失败")
+
+        # 点击审核
+        if processor.locate_and_click_template("audit"):
+            logger.info("已审核")
+        else:
+            logger.error("审核失败")
+        time.sleep(1)
+        pyautogui.hotkey('alt', 'f4')
+
+        # 关闭维护到货单窗口
+        if processor._setup_window(processor.RECEIPT_WINDOW):
+            pyautogui.hotkey('alt', 'f4')
+            logger.info("已关闭维护到货单窗口")
+            time.sleep(1)
+        else:
+            logger.warning("未找到维护到货单窗口")
+
+        # 关闭E10
+        if processor._setup_window(processor.ERP_WINDOW):
+            pyautogui.hotkey('alt', 'f4')
+            logger.info("已关闭E10")
+            time.sleep(1)
+        else:
+            logger.warning("未找到E10")
+        pyautogui.press('enter')
+
+        return True
+
     except Exception as e:
         logger.error("处理送货单数据失败: %s", LogHandler.format_error(e))
         return False
@@ -191,8 +250,8 @@ if __name__ == "__main__":
     # 测试数据
     test_data = {
         "2025-01-15": [
-            {"订单号": "HX-20250110003", "数量": 100, "供应商": "池州华宇"},
-            {"订单号": "HX-20250110004", "数量": 200, "供应商": "池州华宇"}
+            {"订单号": "HX-20250107012", "数量": 100, "供应商": "池州华宇"},
+            {"订单号": "HX-20250107013", "数量": 200, "供应商": "池州华宇"}
         ]
     }
     process_delivery_orders(test_data) 

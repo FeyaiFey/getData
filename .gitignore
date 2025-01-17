@@ -32,9 +32,10 @@ ENV/
 *.swo
 
 # Project specific
-.env
 downloads/
 output/
+screenshots/
+logs/
 *.log
 
 # OS specific

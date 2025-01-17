@@ -13,7 +13,7 @@ class ExcelProcessor:
     
     def __init__(self):
         """初始化Excel处理器"""
-        self.logger = LogHandler().get_logger('ExcelProcessor')
+        self.logger = LogHandler().get_logger('ExcelProcessor', file_level='DEBUG', console_level='INFO')
         self.config = self._load_config()
         
     def _load_config(self) -> dict:
@@ -22,21 +22,14 @@ class ExcelProcessor:
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
-                self.logger.info("成功加载配置文件")
+                self.logger.debug("已加载处理器配置")
                 return config
         except Exception as e:
-            self.logger.error("加载配置文件失败: %s", LogHandler.format_error(e))
+            self.logger.error("加载配置失败: %s", LogHandler.format_error(e))
             return {}
             
     def _save_json(self, data: List[Dict[str, Any]], filename: str, supplier: str):
-        """
-        保存JSON数据到指定位置
-        
-        参数:
-            data: 要保存的数据
-            filename: JSON文件名
-            supplier: 供应商标识
-        """
+        """保存JSON数据到指定位置"""
         try:
             # 确保输出目录存在
             output_dir = self.config['paths'][supplier]['json_output']
@@ -49,20 +42,14 @@ class ExcelProcessor:
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 
-            self.logger.info("JSON数据已保存到: %s", json_path)
+            self.logger.info("已保存JSON数据 [%s]", json_path)
             return json_path
         except Exception as e:
-            self.logger.error("保存JSON数据失败: %s", LogHandler.format_error(e))
+            self.logger.error("保存JSON数据失败 [%s]: %s", filename, LogHandler.format_error(e))
             return None
             
     def _move_excel(self, excel_path: str, supplier: str):
-        """
-        移动Excel文件到指定位置
-        
-        参数:
-            excel_path: Excel文件路径
-            supplier: 供应商标识
-        """
+        """移动Excel文件到指定位置"""
         try:
             # 确保归档目录存在
             archive_dir = self.config['paths'][supplier]['excel_archive']
@@ -74,10 +61,10 @@ class ExcelProcessor:
             
             # 移动文件
             shutil.move(excel_path, target_path)
-            self.logger.info("Excel文件已移动到: %s", target_path)
+            self.logger.debug("已归档Excel文件 [%s]", target_path)
             return True
         except Exception as e:
-            self.logger.error("移动Excel文件失败: %s", LogHandler.format_error(e))
+            self.logger.error("归档Excel文件失败 [%s]: %s", excel_path, LogHandler.format_error(e))
             return False
             
     def _format_date(self, date_str: str, from_format: bool = True) -> Optional[str]:
@@ -237,20 +224,9 @@ class ExcelProcessor:
             return None
             
     def process_excel(self, download_path: str, rule_name: str) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        处理指定目录下的所有Excel文件并返回按日期组织的数据字典。
-        
-        Args:
-            download_path: Excel文件所在目录
-            rule_name: 规则名称，用于确定使用哪个供应商的处理逻辑
-            
-        Returns:
-            Dict[str, List[Dict[str, Any]]]: 返回按日期组织的数据字典
-                - 键: 日期字符串(YYYY-MM-DD格式)
-                - 值: 该日期对应的数据记录列表
-        """
+        """处理指定目录下的所有Excel文件"""
         try:
-            self.logger.info(f"开始处理目录: {download_path}")
+            self.logger.info("开始处理目录 [%s]", download_path)
             
             # 获取供应商标识
             supplier = rule_name.split("_")[0]
@@ -260,23 +236,25 @@ class ExcelProcessor:
             
             # 确保目录存在
             if not os.path.exists(download_path):
-                self.logger.error(f"目录不存在: {download_path}")
-                return {}
+                try:
+                    os.makedirs(download_path)
+                    self.logger.info("已创建目录 [%s]", download_path)
+                except Exception as e:
+                    self.logger.error("创建目录失败 [%s]: %s", download_path, str(e))
+                    return {}
                 
             # 遍历目录下的所有文件
+            excel_count = 0
             for filename in os.listdir(download_path):
                 file_path = os.path.join(download_path, filename)
                 
-                # 跳过目录
-                if os.path.isdir(file_path):
-                    continue
-                    
-                # 检查文件扩展名
-                if not filename.lower().endswith(('.xls', '.xlsx')):
+                # 跳过目录和非Excel文件
+                if os.path.isdir(file_path) or not filename.lower().endswith(('.xls', '.xlsx')):
                     continue
                     
                 try:
-                    self.logger.info(f"处理文件: {filename}")
+                    self.logger.info("处理文件 [%s]", filename)
+                    excel_count += 1
                     
                     # 根据供应商选择相应的处理方法
                     if "池州华宇" in rule_name:
@@ -286,7 +264,7 @@ class ExcelProcessor:
                     elif "江苏芯丰" in rule_name:
                         data_dict = self._process_xinfeng_return_dict(file_path)
                     else:
-                        self.logger.error("未知的供应商类型")
+                        self.logger.error("未知的供应商类型 [%s]", rule_name)
                         continue
                         
                     # 验证和格式化数据
@@ -307,32 +285,33 @@ class ExcelProcessor:
                     self._move_excel(file_path, supplier)
                     
                 except Exception as e:
-                    self.logger.error(f"处理文件 {filename} 失败: {str(e)}")
+                    self.logger.error("处理文件失败 [%s]: %s", filename, LogHandler.format_error(e))
                     continue
                     
             # 保存每个日期的数据到对应的JSON文件
             if all_data:
-                json_output_dir = self.config['paths'][supplier]['json_output']
-                os.makedirs(json_output_dir, exist_ok=True)
-                
+                json_count = 0
                 for date, data_list in all_data.items():
                     try:
                         json_filename = f"{supplier}送货单_{date}.json"
-                        json_path = os.path.join(json_output_dir, json_filename)
+                        json_path = os.path.join(self.config['paths'][supplier]['json_output'], json_filename)
                         
                         with open(json_path, 'w', encoding='utf-8') as f:
                             json.dump(data_list, f, ensure_ascii=False, indent=2)
                             
-                        self.logger.info(f"已保存JSON数据到: {json_path}")
+                        json_count += 1
+                        self.logger.debug("已保存JSON数据 [%s]", json_filename)
                         
                     except Exception as e:
-                        self.logger.error(f"保存JSON数据失败: {str(e)}")
+                        self.logger.error("保存JSON数据失败 [%s]: %s", json_filename, LogHandler.format_error(e))
                         continue
                         
+                self.logger.info("处理完成 - 处理Excel文件: %d个, 生成JSON文件: %d个", excel_count, json_count)
+                
             return all_data
             
         except Exception as e:
-            self.logger.error(f"处理Excel文件失败: {str(e)}")
+            self.logger.error("处理Excel文件失败: %s", LogHandler.format_error(e))
             return {}
             
     def _process_huayu_return_dict(self, excel_path: str) -> Dict[str, List[Dict[str, Any]]]:
@@ -634,8 +613,8 @@ class ExcelProcessor:
                         else:
                             data_dict[delivery_date] = data_list
                             
-            # 更新最后处理日期
-            if self._compare_dates(max_processed_date, last_process_date) > 0:
+            # 所有sheet处理完成后，更新最后处理日期
+            if data_dict and self._compare_dates(max_processed_date, last_process_date) > 0:
                 self._update_last_process_date("山东汉旗", max_processed_date)
                 self.logger.info(f"更新山东汉旗最后处理日期为: {max_processed_date}")
                 

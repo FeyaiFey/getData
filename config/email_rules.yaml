@@ -14,7 +14,7 @@ rules:
     subject_contains: ["^苏州华芯封装产品送货单\\d+\\.\\d+$"]
     sender_contains: ["czmk4@hisemi.com.cn"]
     receiver_contains: ["wanghq@h-sun.com"]
-    attachment_name_pattern: ["^\\d{2}-\\d{2}\\s+008\\s+\\d{2}\\.xlsx?$"]
+    attachment_name_pattern: ["^\\d{1,2}-\\d{1,2}\\s+008\\s+\\d{2}\\.xlsx?$"]
     download_path: "downloads/shipping/池州华宇送货单"
 
   - name: "山东汉旗进度表"

@@ -21,7 +21,14 @@ def shutdown_system(processor: AutoGuiProcessor, logger: LogHandler) -> bool:
     pyautogui.press('c')
     time.sleep(1)
     pyautogui.press('y')
-    if processor.locate_and_click("NO", click=True):
+    if processor.locate_and_click("NO",click=False):
+        if processor.locate_and_click("NO",click=True):
+            logger.info("已关闭E10")
+            return True
+        else:
+            logger.error("关闭E10失败")
+            return False
+    else:
         logger.info("已关闭E10")
         return True
 
@@ -81,7 +88,7 @@ def erp_to_new_receipt(processor: AutoGuiProcessor, logger: LogHandler):
         for step_name, template, window_title, click in steps:
             if not execute_step(processor, logger, step_name, template, window_title, click):
                 return False
-            time.sleep(1)  # 步骤间隔
+            time.sleep(3)  # 步骤间隔
         logger.info("到货单处理流程执行完成")
         return True
         
@@ -119,9 +126,11 @@ def process_delivery_data(processor: AutoGuiProcessor, logger: LogHandler,
         pyautogui.hotkey('ctrl', 'v')
         time.sleep(5)
         pyautogui.press('enter')
-        time.sleep(1)
-        pyautogui.press('enter')
-
+        time.sleep(2)
+        
+        if not processor.locate_and_click('RECEIPT_SUPPLY',click=True):
+            logger.error("供应商定位失败")
+            return False
         # 输入供应商
         pyperclip.copy(supplier)
         pyautogui.hotkey('ctrl', 'v')
